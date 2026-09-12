@@ -11,14 +11,23 @@ onde ele saiu.
 from __future__ import annotations
 
 import json
+import sys
+from pathlib import Path
 
-import altair as alt
-import numpy as np
-import pandas as pd
-import streamlit as st
+# `streamlit run app/main.py` coloca app/ no sys.path, nao a raiz do projeto.
+# Sem isto, `from app import dados` e `from transform import ...` falham. Tem
+# que vir antes dos imports do projeto.
+_RAIZ = Path(__file__).resolve().parent.parent
+if str(_RAIZ) not in sys.path:
+    sys.path.insert(0, str(_RAIZ))
 
-from app import dados
-from transform import indicators, risk, triggers
+import altair as alt  # noqa: E402
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
+import streamlit as st  # noqa: E402
+
+from app import dados  # noqa: E402
+from transform import indicators, risk, triggers  # noqa: E402
 
 st.set_page_config(page_title="B3 -- suporte a decisao", layout="wide")
 
@@ -74,11 +83,26 @@ def main() -> None:
 
 
 # ---------------------------------------------------------------------------
+def _limpar_nulos(df: pd.DataFrame) -> pd.DataFrame:
+    """Troca NaN/None por string vazia nas colunas de texto da tabela.
+
+    Sem isto o DuckDB devolve None e o Streamlit imprime a palavra "None" em
+    toda celula vazia, o que faz ausencia de motivo parecer um valor.
+    """
+    out = df.copy()
+    for c in out.columns:
+        if out[c].dtype == object:
+            out[c] = out[c].where(out[c].notna(), "")
+    return out
+
+
 def _ficha_da_fonte(empresas: pd.DataFrame, cnpj: str) -> None:
     """Criterio de aceite: data e versao do ultimo documento CVM processado."""
     linha = empresas[empresas["cnpj"] == cnpj].iloc[0]
     st.subheader("Ultimo documento CVM")
-    st.metric("Data de referencia", str(linha.get("ultimo_doc_dt_refer") or "-"))
+    dt = linha.get("ultimo_doc_dt_refer")
+    st.metric("Data de referencia",
+              pd.Timestamp(dt).strftime("%d/%m/%Y") if pd.notna(dt) else "-")
     st.write(
         f"**Tipo:** {linha.get('ultimo_doc_tipo') or '-'} &nbsp;&nbsp; "
         f"**Versao:** {linha.get('ultimo_doc_versao') or '-'}"
@@ -103,7 +127,8 @@ def _fundamentos(cnpj: str) -> None:
     sel = ind[ind["periodo"] == periodo].sort_values("indicador")
 
     st.dataframe(
-        sel[["indicador", "valor", "status", "motivo", "formula", "contas_origem"]],
+        _limpar_nulos(sel[["indicador", "valor", "status", "motivo", "formula",
+                           "contas_origem"]]),
         width="stretch", hide_index=True,
     )
 
@@ -121,7 +146,9 @@ def _fundamentos(cnpj: str) -> None:
     with c2:
         st.metric(alvo, "-" if pd.isna(linha["valor"]) else f"{linha['valor']:,.6g}")
         st.write(f"status: `{linha['status']}`")
-    if linha["motivo"]:
+    # `if linha["motivo"]` seria verdadeiro para NaN e imprimiria uma caixa
+    # amarela escrita "nan" em todo indicador calculado com sucesso.
+    if pd.notna(linha["motivo"]) and str(linha["motivo"]).strip():
         st.warning(linha["motivo"])
 
     ent = dados.entradas(cnpj, periodo, alvo)
@@ -316,11 +343,12 @@ def _gatilhos(cnpj: str, ticker: str) -> None:
                 detalhe = pd.DataFrame(
                     [{"metrica": c.metrica, "observado": c.valor_observado,
                       "operador": c.operador, "alvo": str(c.alvo),
-                      "satisfeita": c.satisfeita, "motivo": c.motivo,
-                      "contas_origem": c.origem}
+                      "satisfeita": "sim" if c.satisfeita else
+                                    ("nao" if c.satisfeita is False else "-"),
+                      "motivo": c.motivo, "contas_origem": c.origem}
                      for c in r.condicoes]
                 )
-                st.dataframe(detalhe, width="stretch", hide_index=True)
+                st.dataframe(_limpar_nulos(detalhe), width="stretch", hide_index=True)
 
 
 def _qualidade(cnpj: str, ticker: str) -> None:

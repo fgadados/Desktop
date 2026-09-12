@@ -307,8 +307,10 @@ def demo(args) -> int:
                                        lucro=lucro, ebit=120.0 + 18.0 * i)
         linhas += fx.cenario_dfc_anual(ano=ano, fco=150.0 + 12.0 * i,
                                        fci=-60.0 - 5.0 * i, da=45.0 + 3.0 * i)
-        linhas += fx.cenario_itr_trimestres(
-            ano=ano, isolados=(lucro * 0.20, lucro * 0.25, lucro * 0.28))
+        linhas += fx.cenario_itr_completo(
+            ano=ano, receita=1000.0 + 120.0 * i, lucro=lucro, ebit=120.0 + 18.0 * i,
+            pl=400.0 + 40.0 * i, fco=150.0 + 12.0 * i, fci=-60.0 - 5.0 * i,
+            da=45.0 + 3.0 * i)
     brutos = fx.quadro(linhas)
     brutos["CNPJ_CIA"] = cnpj
 
@@ -324,7 +326,10 @@ def demo(args) -> int:
     con = load.conectar(caminho)
     load.substituir(con, "fato_contabil", pipeline.para_db(fatos))
     load.substituir(con, "teste_identidade", resultado["identidades"])
+    load.substituir(con, "reapresentacao", _para_reapresentacao(resultado["reapresentacoes"]))
     _carregar_indicadores(con, fatos, {cnpj: "INDUSTRIAL"})
+    _demo_empresa(con, cnpj, fatos, resultado)
+    _demo_precos(con, cnpj)
 
     sep = "=" * 92
     print(f"\n{sep}\nIndicadores do exercicio 2023\n{sep}")
@@ -374,9 +379,68 @@ def demo(args) -> int:
 
     con.close()
     print(f"\nBanco de demonstracao: {caminho}")
-    print("Para abrir a interface sobre ele:  B3DSS_DATA=data streamlit run app/main.py")
-    print("(a interface le data/b3dss.duckdb; renomeie o demo se quiser visualizar)")
+    print(f"Para VER isto na interface:  B3DSS_DB={caminho} streamlit run app/main.py")
     return 0
+
+
+def _demo_empresa(con, cnpj: str, fatos: pd.DataFrame, resultado: dict) -> None:
+    rel = resultado["relatorio_base"]
+    linha = rel[rel["CNPJ_CIA"] == cnpj]
+    emp = pd.DataFrame([{
+        "cnpj": cnpj,
+        "denom_social": "COMPANHIA SINTETICA S.A. -- DADOS INVENTADOS",
+        "cd_cvm": "99999",
+        "setor_ativ": "EMP. ADM. PART.",
+        "plano_contas": "INDUSTRIAL",
+        "origem_classificacao": "cenario de demonstracao (run.py demo)",
+        "situacao": "ATIVO",
+        "base_escolhida": linha["base_escolhida"].iloc[0] if not linha.empty else "CON",
+        "cobertura_con": int(linha["cobertura_con"].iloc[0]) if not linha.empty else 0,
+        "cobertura_ind": int(linha["cobertura_ind"].iloc[0]) if not linha.empty else 0,
+        "criterio_base": linha["criterio"].iloc[0] if not linha.empty else "-",
+    }]).merge(pipeline.ultimo_documento(fatos), on="cnpj", how="left")
+    load.substituir(con, "empresa", emp)
+    load.substituir(con, "depara_ticker", pd.DataFrame([{
+        "cnpj": cnpj, "ticker": "DEMO3", "valor_mobiliario": "Acoes Ordinarias",
+        "mercado": "Bolsa", "negociado_b3": True,
+        "src_file": "cenario de demonstracao", "src_line": 2,
+    }]))
+
+
+def _demo_precos(con, cnpj: str) -> None:
+    """Serie diaria com desdobramento 1:2 e uma queda de verdade.
+
+    Caminho aleatorio com semente fixa: a serie tem volatilidade e drawdown
+    observaveis, senao as medidas de risco saem todas zero e a tela de risco
+    nao demonstra nada. Semente fixa mantem o demo idempotente.
+    """
+    import numpy as np
+
+    rng = np.random.default_rng(42)
+    n, meio = 1_000, 600
+    datas = pd.bdate_range("2020-01-02", periods=n)
+    retornos = rng.normal(0.0004, 0.021, n)
+    retornos[180:260] -= 0.006  # janela de queda sustentada, para o drawdown
+    fech = 40.0 * np.cumprod(1.0 + retornos)
+    fech[meio:] /= 2.0  # desdobramento 1:2 a partir do pregao 601
+
+    serie = pd.DataFrame({
+        "data": datas, "fech": fech,
+        "src_file": "COTAHIST_A2020.TXT", "src_line": range(2, 2 + n),
+    })
+    eventos = pd.DataFrame([{
+        "ticker": "DEMO3", "data_ex": datas[meio], "tipo": "DESDOBRAMENTO",
+        "fator": 2.0, "valor_por_acao": None,
+        "fonte_url": "cenario de demonstracao -- nao e fonte real",
+        "observacao": "sintetico",
+    }])
+    aj = prices.ajustar(serie, eventos)
+    aj["ticker"] = "DEMO3"
+    load.substituir(con, "preco_diario", aj)
+    load.substituir(con, "evento_corporativo", eventos)
+    status, motivo = prices.cobertura_ajuste("DEMO3", eventos, pd.DataFrame())
+    load.substituir(con, "cobertura_ajuste",
+                    pd.DataFrame([{"ticker": "DEMO3", "status": status, "motivo": motivo}]))
 
 
 def main() -> int:

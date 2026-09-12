@@ -20,7 +20,11 @@ RAW = DATA / "raw"  # bytes exatamente como baixados
 PARQUET = DATA / "parquet"  # brutos tabulados, sem normalizacao
 WAREHOUSE = DATA / "warehouse"  # saida da camada transform
 MANUAL = DATA / "manual"  # entradas mantidas a mao pelo usuario
-DUCKDB_PATH = DATA / "b3dss.duckdb"
+
+# Banco analitico. `B3DSS_DB` permite abrir a interface sobre outro arquivo --
+# o de demonstracao, por exemplo -- sem renomear nada:
+#     B3DSS_DB=data/demo.duckdb streamlit run app/main.py
+DUCKDB_PATH = Path(os.environ.get("B3DSS_DB", DATA / "b3dss.duckdb"))
 
 CONFIG_DIR = ROOT / "config"
 
