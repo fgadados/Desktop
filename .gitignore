@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.DS_Store
+
+# Dados: brutos, derivados e banco. Nada disso entra no repositorio.
+data/raw/
+data/parquet/
+data/warehouse/
+data/*.duckdb
+data/*.duckdb.wal
+
+# Excecao: entradas mantidas a mao pelo usuario sao versionadas.
+!data/manual/
