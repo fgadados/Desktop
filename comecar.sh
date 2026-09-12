@@ -14,7 +14,32 @@ set -euo pipefail
 RAIZ="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$RAIZ"
 
-VERDE=$'\033[0;32m'; VERM=$'\033[0;31m'; AMAR=$'\033[0;33m'; FIM=$'\033[0m'
+# Grava a execucao inteira em b3dss-log.txt, na propria pasta do projeto.
+# Assim nao e preciso copiar nada do terminal quando algo falha: basta
+# arrastar o arquivo. Reexecuta o script uma vez com a saida duplicada.
+LOG="$RAIZ/b3dss-log.txt"
+if [ -z "${B3DSS_LOGGING:-}" ]; then
+  export B3DSS_LOGGING=1
+  { echo "### $(date '+%Y-%m-%d %H:%M:%S')  comecar.sh $*"; } > "$LOG"
+  set +e
+  "$0" "$@" 2>&1 | tee -a "$LOG"
+  CODIGO="${PIPESTATUS[0]}"
+  if [ "$CODIGO" -ne 0 ]; then
+    echo
+    echo "Falhou (codigo $CODIGO). A execucao inteira ficou registrada em:"
+    echo "    $LOG"
+    echo "Arraste esse arquivo para a conversa e eu acho a causa."
+  fi
+  exit "$CODIGO"
+fi
+
+# Cor so quando a saida e um terminal de verdade. Sob o `tee` do log ela
+# seria gravada como lixo de escape dentro do arquivo.
+if [ -t 1 ]; then
+  VERDE=$'\033[0;32m'; VERM=$'\033[0;31m'; AMAR=$'\033[0;33m'; FIM=$'\033[0m'
+else
+  VERDE=""; VERM=""; AMAR=""; FIM=""
+fi
 ok()   { echo "${VERDE}✓${FIM} $*"; }
 erro() { echo "${VERM}✗${FIM} $*" >&2; }
 info() { echo "${AMAR}→${FIM} $*"; }

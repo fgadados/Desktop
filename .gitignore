@@ -4,6 +4,9 @@ __pycache__/
 .pytest_cache/
 .DS_Store
 
+# Log de execucao do comecar.sh, gerado a cada rodada.
+b3dss-log.txt
+
 # Dados: brutos, derivados e banco. Nada disso entra no repositorio.
 data/raw/
 data/parquet/
