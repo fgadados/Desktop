@@ -27,7 +27,17 @@ export PYTHONUNBUFFERED=1
 LOG="$RAIZ/b3dss-log.txt"
 if [ -z "${B3DSS_LOGGING:-}" ]; then
   export B3DSS_LOGGING=1
-  { echo "### $(date '+%Y-%m-%d %H:%M:%S')  comecar.sh $*"; } > "$LOG"
+  # O log carimba a versao exata do codigo. Sem isso e impossivel distinguir
+  # "a correcao nao funcionou" de "a correcao nao foi baixada" -- e ja se
+  # gastou uma rodada nessa duvida.
+  _commit="$(git -C "$RAIZ" rev-parse --short HEAD 2>/dev/null || echo 'sem git')"
+  _data_commit="$(git -C "$RAIZ" log -1 --format=%cd --date=format:'%d/%m %H:%M' 2>/dev/null || echo '?')"
+  _sujo=""
+  git -C "$RAIZ" diff --quiet 2>/dev/null || _sujo=" (com alteracoes locais nao commitadas)"
+  {
+    echo "### $(date '+%Y-%m-%d %H:%M:%S')  comecar.sh $*"
+    echo "### codigo: commit $_commit de $_data_commit$_sujo"
+  } > "$LOG"
   set +e
   "$0" "$@" 2>&1 | tee -a "$LOG"
   CODIGO="${PIPESTATUS[0]}"
@@ -104,6 +114,7 @@ if ! PY="$(achar_python)"; then
 fi
 PYVER="$(versao_de "$PY")"
 ok "Python encontrado: $PY ($PYVER)"
+info "Codigo: commit $(git -C "$RAIZ" rev-parse --short HEAD 2>/dev/null || echo '?')"
 
 case "$PYVER" in
   3.11|3.12|3.13) ;;
