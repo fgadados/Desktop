@@ -34,6 +34,13 @@ from etl.config import CONFIG_DIR, PARQUET
 from transform import depara, indicators, lineage, pipeline, prices, risk, sector, triggers
 
 
+# Fontes sem as quais nao ha analise nenhuma. As demais sao auxiliares: a
+# ausencia delas tira funcionalidade, nao invalida o resto. Derrubar a
+# transformacao inteira porque o BCB esta fora seria jogar fora meia hora de
+# download bom da CVM e da B3.
+ESSENCIAIS = {"cadastro CVM", "FCA (de-para ticker)", "DFP", "ITR"}
+
+
 def _config() -> dict:
     return yaml.safe_load((CONFIG_DIR / "tickers.yml").read_text(encoding="utf-8"))
 
@@ -94,10 +101,24 @@ def extrair(args) -> int:
 
     print(f"\n{len(provenance.manifesto())} arquivos no manifesto de proveniencia "
           f"({time.monotonic() - inicio_total:.0f}s no total).")
-    if falhas:
-        print(f"\n{len(falhas)} etapa(s) falharam. O pipeline NAO preenche o que faltou.")
+    if not falhas:
+        return 0
+
+    nomes_falhos = {n for n, _ in falhas}
+    essenciais_falhos = nomes_falhos & ESSENCIAIS
+    print(f"\n{len(falhas)} etapa(s) falharam. O pipeline NAO preenche o que faltou:")
+    for nome, exc in falhas:
+        marca = "ESSENCIAL" if nome in ESSENCIAIS else "auxiliar"
+        print(f"  [{marca}] {nome}: {type(exc).__name__}: {exc}")
+
+    if essenciais_falhos:
+        print("\nFonte essencial faltando. Sem ela nao ha o que transformar.")
         return 1
-    return 0
+
+    print("\nSo fontes auxiliares falharam. Os fundamentos e os precos estao "
+          "completos, entao vale seguir para a transformacao -- os indicadores "
+          "que dependiam do que faltou aparecerao como FALTANDO, com o motivo.")
+    return 2  # parcial: quem chama decide se prossegue
 
 
 # ---------------------------------------------------------------------------

@@ -174,7 +174,19 @@ case "$MODO" in
       exit 1
     fi
     ok "Contratos conferem com os arquivos reais"
+    # `extrair` devolve 2 quando so fontes AUXILIARES falharam. Nesse caso a
+    # transformacao segue: descartar o download bom da CVM e da B3 porque o
+    # BCB esta fora seria perder meia hora de trabalho por um dado acessorio.
+    set +e
     "$VPY" run.py extrair
+    CODIGO_EXTRAIR=$?
+    set -e
+    case "$CODIGO_EXTRAIR" in
+      0) ok "Extracao completa" ;;
+      2) info "Extracao PARCIAL (ver acima). Seguindo com o que foi obtido." ;;
+      *) erro "Extracao falhou numa fonte essencial. Nada a transformar."
+         exit "$CODIGO_EXTRAIR" ;;
+    esac
     "$VPY" run.py transformar
     BANCO="data/b3dss.duckdb"
     ;;

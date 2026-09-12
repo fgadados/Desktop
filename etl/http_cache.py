@@ -9,6 +9,7 @@ para que uma queda no meio nao deixe um bruto truncado no cache.
 
 from __future__ import annotations
 
+import hashlib
 import re
 import time
 from pathlib import Path
@@ -31,7 +32,18 @@ def _sessao() -> requests.Session:
 
 
 def _destino(url: str, subdir: str) -> Path:
-    nome = Path(urlparse(url).path).name or "index.html"
+    """Caminho local do bruto. URLs distintas nunca compartilham arquivo.
+
+    Sem isto, toda serie do SGS cairia no mesmo nome: as URLs do BCB terminam
+    todas em `/dados`, e o que as distingue -- codigo da serie e intervalo de
+    datas -- esta na query. Uma serie sobrescreveria a outra em silencio.
+    """
+    partes = urlparse(url)
+    nome = Path(partes.path).name or "index.html"
+    if partes.query:
+        assinatura = hashlib.sha256(url.encode("utf-8")).hexdigest()[:12]
+        base, ponto, ext = nome.partition(".")
+        nome = f"{base}-{assinatura}{ponto}{ext}" if ponto else f"{nome}-{assinatura}.json"
     d = RAW / subdir
     d.mkdir(parents=True, exist_ok=True)
     return d / nome
@@ -42,7 +54,8 @@ def _mb(n: int) -> str:
 
 
 def baixar(url: str, subdir: str, *, forcar: bool = False,
-           silencioso: bool = False) -> provenance.Fonte:
+           silencioso: bool = False,
+           headers: dict[str, str] | None = None) -> provenance.Fonte:
     """Baixa `url` para `data/raw/<subdir>/`, revalidando pelo manifesto.
 
     Devolve a `Fonte` com sha256 e cabecalhos de validacao. Nao levanta em
@@ -56,7 +69,9 @@ def baixar(url: str, subdir: str, *, forcar: bool = False,
     nome = destino.name
     inicio = time.monotonic()
 
-    headers: dict[str, str] = {}
+    # Cabecalhos extras por fonte: o gateway do BCB recusa User-Agent
+    # incomum com HTTP 406.
+    headers = dict(headers or {})
     if anterior and destino.exists() and not forcar:
         if anterior.etag:
             headers["If-None-Match"] = anterior.etag
