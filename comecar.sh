@@ -16,6 +16,11 @@ set -euo pipefail
 RAIZ="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$RAIZ"
 
+# Sem isto o Python bufferiza a saida ao escrever num cano -- e ela escreve
+# num cano, por causa do `tee` do log logo abaixo. O efeito na tela e um
+# cursor parado por minutos durante o download, indistinguivel de travamento.
+export PYTHONUNBUFFERED=1
+
 # Grava a execucao inteira em b3dss-log.txt, na propria pasta do projeto.
 # Assim nao e preciso copiar nada do terminal quando algo falha: basta
 # arrastar o arquivo. Reexecuta o script uma vez com a saida duplicada.

@@ -37,14 +37,24 @@ def _destino(url: str, subdir: str) -> Path:
     return d / nome
 
 
-def baixar(url: str, subdir: str, *, forcar: bool = False) -> provenance.Fonte:
+def _mb(n: int) -> str:
+    return f"{n / 1_048_576:.1f} MB"
+
+
+def baixar(url: str, subdir: str, *, forcar: bool = False,
+           silencioso: bool = False) -> provenance.Fonte:
     """Baixa `url` para `data/raw/<subdir>/`, revalidando pelo manifesto.
 
     Devolve a `Fonte` com sha256 e cabecalhos de validacao. Nao levanta em
     caso de 304: devolve a Fonte ja registrada.
+
+    Imprime o progresso: um download de dez anos de COTAHIST leva minutos, e
+    silencio nesse intervalo e indistinguivel de travamento.
     """
     destino = _destino(url, subdir)
     anterior = provenance.consultar(url)
+    nome = destino.name
+    inicio = time.monotonic()
 
     headers: dict[str, str] = {}
     if anterior and destino.exists() and not forcar:
@@ -60,16 +70,34 @@ def baixar(url: str, subdir: str, *, forcar: bool = False) -> provenance.Fonte:
                 r = s.get(url, headers=headers, timeout=HTTP_TIMEOUT, stream=True)
                 if r.status_code == 304:
                     assert anterior is not None
+                    if not silencioso:
+                        print(f"      {nome}: em cache, nao mudou", flush=True)
                     return anterior
                 if r.status_code != 200:
                     raise DownloadError(f"HTTP {r.status_code} em {url}")
 
+                total = int(r.headers.get("Content-Length") or 0)
+                if not silencioso:
+                    tamanho = f" ({_mb(total)})" if total else ""
+                    print(f"      baixando {nome}{tamanho}...", flush=True)
+
                 parcial = destino.with_suffix(destino.suffix + ".part")
+                recebido = 0
+                proximo_aviso = 8 << 20  # avisa a cada 8 MB em arquivo grande
                 with open(parcial, "wb") as fh:
                     for bloco in r.iter_content(chunk_size=1 << 20):
-                        if bloco:
-                            fh.write(bloco)
+                        if not bloco:
+                            continue
+                        fh.write(bloco)
+                        recebido += len(bloco)
+                        if not silencioso and recebido >= proximo_aviso:
+                            pct = f" ({recebido * 100 // total}%)" if total else ""
+                            print(f"        {_mb(recebido)}{pct}", flush=True)
+                            proximo_aviso += 8 << 20
                 parcial.replace(destino)
+                if not silencioso:
+                    seg = time.monotonic() - inicio
+                    print(f"      {nome}: {_mb(recebido)} em {seg:.0f}s", flush=True)
 
                 fonte = provenance.Fonte(
                     url=url,

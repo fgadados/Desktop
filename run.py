@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import re
 import sys
+import time
 from datetime import date
 from pathlib import Path
 
@@ -55,16 +56,26 @@ def extrair(args) -> int:
         ("BCB/SGS", lambda: bcb_sgs.extrair(date(min(anos_cot), 1, 1), date.today())),
     ]
 
+    print(f"{len(etapas)} etapas. Anos CVM: {min(anos_cvm)}-{max(anos_cvm)}; "
+          f"COTAHIST: {min(anos_cot)}-{max(anos_cot)}.")
+    print("Sao centenas de MB. O que ja foi baixado nao baixa de novo.\n")
+
     falhas = []
-    for nome, fn in etapas:
+    inicio_total = time.monotonic()
+    for i, (nome, fn) in enumerate(etapas, start=1):
+        print(f"  [{i}/{len(etapas)}] {nome}...", flush=True)
+        t0 = time.monotonic()
         try:
             saida = fn()
-            print(f"  ok   {nome}: {saida}")
+            print(f"  [{i}/{len(etapas)}] ok {nome} "
+                  f"({time.monotonic() - t0:.0f}s): {saida}\n", flush=True)
         except Exception as exc:  # noqa: BLE001 -- o relatorio final e o produto
             falhas.append((nome, exc))
-            print(f"  FALHA {nome}: {type(exc).__name__}: {exc}", file=sys.stderr)
+            print(f"  [{i}/{len(etapas)}] FALHA {nome}: {type(exc).__name__}: {exc}\n",
+                  file=sys.stderr, flush=True)
 
-    print(f"\n{len(provenance.manifesto())} arquivos no manifesto de proveniencia.")
+    print(f"\n{len(provenance.manifesto())} arquivos no manifesto de proveniencia "
+          f"({time.monotonic() - inicio_total:.0f}s no total).")
     if falhas:
         print(f"\n{len(falhas)} etapa(s) falharam. O pipeline NAO preenche o que faltou.")
         return 1
