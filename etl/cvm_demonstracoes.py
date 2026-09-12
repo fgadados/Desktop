@@ -17,16 +17,28 @@ from pathlib import Path
 import pandas as pd
 
 from etl import cvm_common, http_cache
-from etl.contracts import CABECALHO, CONTRATOS_DEMONSTRATIVO
+from etl.contracts import CABECALHO, COMPOSICAO_CAPITAL, CONTRATOS_DEMONSTRATIVO
 
 # dfp_cia_aberta_BPA_con_2023.csv -> (dfp, BPA, con, 2023)
 # itr_cia_aberta_2023.csv         -> (itr, None, None, 2023)  [cabecalho]
 _PADRAO = re.compile(
     r"^(?P<doc>dfp|itr)_cia_aberta"
-    r"(?:_(?P<dem>BPA|BPP|DRE|DRA|DFC_MD|DFC_MI|DVA|DMPL)_(?P<base>con|ind))?"
+    r"(?:_(?P<dem>BPA|BPP|DRE|DRA|DFC_MD|DFC_MI|DVA|DMPL)_(?P<base>con|ind)"
+    r"|_(?P<aux>composicao_capital|parecer))?"
     r"_(?P<ano>\d{4})\.csv$",
     re.IGNORECASE,
 )
+
+# Tipos de arquivo dentro do pacote, confrontados com o ZIP real da CVM
+# (DFP e ITR de 2023, em 12/09/2026):
+#   demonstrativo       -- BPA, BPP, DRE, DFC_MI, ... os fatos contabeis
+#   cabecalho           -- um registro por documento entregue
+#   composicao_capital  -- quantidade de acoes em circulacao (ver abaixo)
+#   parecer             -- parecer do auditor, texto livre
+TIPO_DEMONSTRATIVO = "demonstrativo"
+TIPO_CABECALHO = "cabecalho"
+TIPO_COMPOSICAO_CAPITAL = "composicao_capital"
+TIPO_PARECER = "parecer"
 
 
 def _decompor(nome_interno: str) -> dict | None:
@@ -34,7 +46,15 @@ def _decompor(nome_interno: str) -> dict | None:
     if not m:
         return None
     g = m.groupdict()
+    aux = (g["aux"] or "").lower()
+    if g["dem"]:
+        tipo = TIPO_DEMONSTRATIVO
+    elif aux:
+        tipo = aux  # composicao_capital | parecer
+    else:
+        tipo = TIPO_CABECALHO
     return {
+        "tipo": tipo,
         "doc": g["doc"].upper(),
         "demonstrativo": (g["dem"] or "").upper() or None,
         "base": (g["base"] or "").upper() or None,  # CON | IND | None
@@ -49,6 +69,7 @@ def extrair_ano(doc: str, url_pacote: str) -> dict[str, pd.DataFrame]:
 
     fatos: list[pd.DataFrame] = []
     cabecalhos: list[pd.DataFrame] = []
+    capital: list[pd.DataFrame] = []
 
     for nome in cvm_common.nomes_no_zip(zip_path):
         meta = _decompor(nome)
@@ -59,7 +80,22 @@ def extrair_ano(doc: str, url_pacote: str) -> dict[str, pd.DataFrame]:
                 "de nomes da CVM. Atualize etl/cvm_demonstracoes._PADRAO."
             )
 
-        if meta["demonstrativo"] is None:
+        if meta["tipo"] == TIPO_PARECER:
+            # Parecer do auditor: texto corrido, com quebra de linha dentro de
+            # campo. Nao entra no pipeline de fatos -- `_conferir_linhas`
+            # falharia, e com razao: ali src_line nao seria garantido.
+            continue
+
+        if meta["tipo"] == TIPO_COMPOSICAO_CAPITAL:
+            df = cvm_common.ler_csv_do_zip(
+                zip_path, nome, COMPOSICAO_CAPITAL, fonte.sha256, strict=False
+            )
+            df["doc"] = meta["doc"]
+            df["ano_arquivo"] = meta["ano_arquivo"]
+            capital.append(df)
+            continue
+
+        if meta["tipo"] == TIPO_CABECALHO:
             df = cvm_common.ler_csv_do_zip(zip_path, nome, CABECALHO, fonte.sha256)
             df["doc"] = meta["doc"]
             cabecalhos.append(df)
@@ -74,6 +110,9 @@ def extrair_ano(doc: str, url_pacote: str) -> dict[str, pd.DataFrame]:
     return {
         "fatos": pd.concat(fatos, ignore_index=True) if fatos else _vazio_fatos(),
         "cabecalho": pd.concat(cabecalhos, ignore_index=True) if cabecalhos else pd.DataFrame(),
+        "composicao_capital": (
+            pd.concat(capital, ignore_index=True) if capital else pd.DataFrame()
+        ),
     }
 
 
@@ -95,12 +134,14 @@ def extrair(doc: str, anos: list[int] | None = None) -> dict[str, Path]:
             f"nenhum pacote {doc} encontrado no diretorio da CVM para anos={anos}"
         )
 
-    fatos, cabecalhos = [], []
+    fatos, cabecalhos, capital = [], [], []
     for url in pacotes:
         r = extrair_ano(doc, url)
         fatos.append(r["fatos"])
         if not r["cabecalho"].empty:
             cabecalhos.append(r["cabecalho"])
+        if not r["composicao_capital"].empty:
+            capital.append(r["composicao_capital"])
 
     saidas = {
         "fatos": cvm_common.salvar_parquet(
@@ -110,5 +151,10 @@ def extrair(doc: str, anos: list[int] | None = None) -> dict[str, Path]:
     if cabecalhos:
         saidas["cabecalho"] = cvm_common.salvar_parquet(
             pd.concat(cabecalhos, ignore_index=True), f"cvm/{doc.lower()}_cabecalho.parquet"
+        )
+    if capital:
+        saidas["composicao_capital"] = cvm_common.salvar_parquet(
+            pd.concat(capital, ignore_index=True),
+            f"cvm/{doc.lower()}_composicao_capital.parquet",
         )
     return saidas

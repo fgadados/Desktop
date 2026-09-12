@@ -16,6 +16,7 @@ Parquet em `data/parquet/`.
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from datetime import date
 from pathlib import Path
@@ -474,10 +475,54 @@ def pagina(args) -> int:
     return 0
 
 
+def schema(args) -> int:
+    """Imprime as colunas REAIS de cada CSV dos pacotes ja baixados.
+
+    Nao usa rede: le os ZIP em data/raw/. Serve para confrontar contrato
+    declarado contra arquivo de verdade sem adivinhar nome de coluna.
+    """
+    import io
+    import zipfile
+
+    from etl.config import CVM_ENCODING, CVM_SEP, RAW
+
+    zips = sorted(RAW.rglob("*.zip"))
+    if not zips:
+        print("nenhum pacote baixado em data/raw/. Rode a extracao antes.",
+              file=sys.stderr)
+        return 1
+
+    vistos: dict[str, tuple[str, list[str]]] = {}
+    for z in zips:
+        try:
+            with zipfile.ZipFile(z) as zf:
+                for nome in sorted(n for n in zf.namelist() if n.lower().endswith(".csv")):
+                    # Assinatura do arquivo, sem o ano: basta um exemplar.
+                    chave = re.sub(r"\d{4}", "AAAA", Path(nome).name)
+                    if chave in vistos:
+                        continue
+                    with zf.open(nome) as fh:
+                        cabecalho = io.TextIOWrapper(fh, encoding=CVM_ENCODING).readline()
+                    colunas = [c.strip() for c in cabecalho.rstrip("\r\n").split(CVM_SEP)]
+                    vistos[chave] = (z.name, colunas)
+        except zipfile.BadZipFile:
+            print(f"  (ignorado, nao e ZIP valido: {z.name})", file=sys.stderr)
+
+    print(f"{len(vistos)} tipo(s) de arquivo encontrados em {len(zips)} pacote(s).\n")
+    for chave in sorted(vistos):
+        pacote, colunas = vistos[chave]
+        print(f"{chave}   [{pacote}]")
+        print(f"    {len(colunas)} colunas: {';'.join(colunas)}\n")
+    print("Cole esta saida na conversa para que os contratos sejam ajustados "
+          "contra o arquivo real, sem suposicao.")
+    return 0
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="comando", required=True)
+    sub.add_parser("schema").set_defaults(fn=schema)
     pag = sub.add_parser("pagina")
     pag.add_argument("--banco", help="caminho do .duckdb (padrao: data/b3dss.duckdb)")
     pag.add_argument("--saida", help="arquivo HTML de saida (padrao: empresas.html)")

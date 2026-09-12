@@ -142,6 +142,28 @@ CABECALHO = Contrato(
     _ORIGEM_CVM,
 )
 
+# ---------------------------------------------------------------------------
+# Composicao do capital -- quantidade de acoes em circulacao
+# ---------------------------------------------------------------------------
+# Este arquivo existe dentro dos pacotes DFP e ITR e foi descoberto ao
+# confrontar o ZIP real com o parser (12/09/2026). Ele e o insumo que faltava
+# para P/L e P/VP: a quantidade de acoes nunca esteve nas demonstracoes, mas
+# esta aqui, ao lado delas, na propria CVM.
+#
+# So os campos de identificacao sao declarados -- esses sao iguais em todo
+# arquivo da CVM e ja foram confirmados nos demais contratos. Os campos de
+# quantidade NAO sao declarados porque ainda nao foram vistos: a validacao
+# roda em modo nao-estrito e `python run.py schema` imprime os nomes reais.
+# Declarar nome de coluna por suposicao aqui seria exatamente o que este
+# modulo existe para impedir.
+COMPOSICAO_CAPITAL = Contrato(
+    "cvm_composicao_capital",
+    ("CNPJ_CIA", "DT_REFER", "VERSAO", "DENOM_CIA", "CD_CVM"),
+    ("CNPJ_CIA", "DT_REFER", "VERSAO"),
+    "identificacao confirmada nos demais contratos da CVM; campos de "
+    "quantidade ainda NAO confrontados -- rode `python run.py schema`",
+)
+
 # Mapa demonstrativo -> contrato. As chaves sao os sufixos que aparecem no nome
 # dos CSVs dentro do ZIP da CVM (ex.: dfp_cia_aberta_BPA_con_2023.csv).
 CONTRATOS_DEMONSTRATIVO = {
@@ -229,6 +251,6 @@ TODOS = {
     c.nome: c
     for c in (
         BPA, BPP, DRE, DRA, DFC_MI, DFC_MD, DVA, DMPL,
-        CABECALHO, CAD_CIA, FCA_VALOR_MOBILIARIO, IPE,
+        CABECALHO, CAD_CIA, FCA_VALOR_MOBILIARIO, IPE, COMPOSICAO_CAPITAL,
     )
 }

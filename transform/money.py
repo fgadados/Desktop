@@ -16,7 +16,18 @@ import unicodedata
 
 import pandas as pd
 
-ESCALAS = {"UNIDADE": 1.0, "MILHAR": 1_000.0, "MILHAO": 1_000_000.0}
+# CONFRONTADO COM ARQUIVO REAL em 12/09/2026 (DFP e ITR de 2023): a CVM grava
+# "MIL", nao "MILHAR". O valor declarado antes vinha do layout publicado e
+# estava errado. Consequencia se tivesse passado batido: `converter` levantaria
+# erro em toda linha em milhar -- ou, pior, num pipeline menos rigoroso, cada
+# valor sairia 1000x menor. "MILHAR" e "MILHOES" ficam como sinonimos aceitos.
+ESCALAS = {
+    "UNIDADE": 1.0,
+    "MIL": 1_000.0,
+    "MILHAR": 1_000.0,
+    "MILHAO": 1_000_000.0,
+    "MILHOES": 1_000_000.0,
+}
 MOEDA_ESPERADA = "REAL"
 
 
