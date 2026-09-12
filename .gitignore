@@ -4,6 +4,13 @@ __pycache__/
 .pytest_cache/
 .DS_Store
 
+# Artefatos gerados por `pip install -e .`. Sao locais de cada maquina: se
+# entrarem no repositorio, o `git pull` de quem ja instalou aborta porque
+# sobrescreveria arquivos nao rastreados.
+*.egg-info/
+build/
+dist/
+
 # Log de execucao do comecar.sh, gerado a cada rodada.
 b3dss-log.txt
 
