@@ -38,13 +38,31 @@ def _config() -> dict:
     return yaml.safe_load((CONFIG_DIR / "tickers.yml").read_text(encoding="utf-8"))
 
 
+def anos_da_config(cfg: dict, fonte: str, hoje: date | None = None) -> list[int]:
+    """Janela RELATIVA: ano corrente mais N anos para tras.
+
+    Uma lista fixa no arquivo de configuracao envelhece sem avisar -- o
+    sistema passa a ignorar os anos recentes calado. Por isso a janela e
+    calculada na execucao. Lista explicita, quando existir, vence.
+    """
+    explicita = cfg.get(f"anos_{fonte}")
+    if explicita:
+        return sorted(int(a) for a in explicita)
+
+    para_tras = int(cfg.get(f"anos_para_tras_{fonte}", 6))
+    if para_tras < 0:
+        raise ValueError(f"anos_para_tras_{fonte} = {para_tras}: nao pode ser negativo")
+    corrente = (hoje or date.today()).year
+    return list(range(corrente - para_tras, corrente + 1))
+
+
 # ---------------------------------------------------------------------------
 # Extracao
 # ---------------------------------------------------------------------------
 def extrair(args) -> int:
     cfg = _config()
-    anos_cvm = cfg["anos_cvm"]
-    anos_cot = cfg["anos_cotahist"]
+    anos_cvm = anos_da_config(cfg, "cvm")
+    anos_cot = anos_da_config(cfg, "cotahist")
 
     etapas = [
         ("cadastro CVM", lambda: cvm_cadastro.extrair()),

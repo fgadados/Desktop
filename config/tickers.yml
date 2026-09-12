@@ -10,8 +10,27 @@
 # O CNPJ nao e escrito aqui: ele e resolvido pelo de-para do FCA (regra 1).
 # Se um ticker nao resolver, o pipeline reporta e segue -- nao adivinha.
 
-anos_cvm: [2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024]
-anos_cotahist: [2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024]
+# Janela de dados: ano corrente mais N anos para tras.
+#
+# A janela e RELATIVA de proposito. Uma lista fixa de anos envelhece em
+# silencio -- foi o que aconteceu antes: o arquivo dizia [2015..2024] e, em
+# 2026, o sistema ignorava calado os dois anos mais recentes, que sao os que
+# importam.
+#
+# 6 para tras + o corrente = 7 anos. Efeito na analise: o percentil de 5 anos
+# funciona; o de 10 anos fica FALTANDO, por falta de historico. Para habilitar
+# a janela de 10 anos, suba para 10.
+#
+# Ano ainda nao publicado pela fonte simplesmente nao aparece: os diretorios
+# da CVM sao listados antes do download, e o COTAHIST reporta o ano ausente
+# em vez de derrubar a extracao inteira.
+anos_para_tras_cvm: 6
+anos_para_tras_cotahist: 6
+
+# Para fixar uma janela fechada (reproduzir uma analise antiga, por exemplo),
+# descomente e liste os anos. A lista explicita vence o calculo automatico.
+# anos_cvm: [2023, 2024]
+# anos_cotahist: [2023, 2024]
 
 tickers:
   - WEGE3   # industrial, historico longo, desdobramentos frequentes

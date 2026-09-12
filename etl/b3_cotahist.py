@@ -155,17 +155,37 @@ def parse_arquivo(path: Path, sha256: str) -> pd.DataFrame:
 
 
 def extrair(anos: list[int] | None = None) -> Path:
+    """Baixa e parseia os arquivos anuais.
+
+    Ano ausente na B3 -- tipicamente o corrente, antes do primeiro pregao do
+    ano -- e reportado e pulado, nao derruba a extracao inteira. Se nenhum
+    ano vier, levanta: aqui nao ha o que reportar como parcial.
+    """
     from datetime import date
 
     if anos is None:
         anos = list(range(COTAHIST_ANO_INICIAL, date.today().year + 1))
 
-    quadros = []
+    quadros, ausentes = [], []
     for ano in anos:
-        fonte = http_cache.baixar(COTAHIST_URL.format(ano=ano), subdir="b3/cotahist")
+        try:
+            fonte = http_cache.baixar(COTAHIST_URL.format(ano=ano), subdir="b3/cotahist")
+        except http_cache.DownloadError as exc:
+            ausentes.append((ano, str(exc)))
+            print(f"      COTAHIST {ano}: indisponivel na B3 ({exc}). "
+                  "Os pregoes deste ano ficam FALTANDO.", flush=True)
+            continue
         df = parse_arquivo(Path(fonte.path), fonte.sha256)
         df["ano_arquivo"] = ano
         quadros.append(df)
+
+    if not quadros:
+        raise FileNotFoundError(
+            f"nenhum arquivo COTAHIST obtido para {anos}. Ausentes: {ausentes}"
+        )
+    if ausentes:
+        print(f"      {len(ausentes)} ano(s) sem COTAHIST: "
+              f"{[a for a, _ in ausentes]}", flush=True)
 
     todos = pd.concat(quadros, ignore_index=True)
     return cvm_common.salvar_parquet(todos, "b3/cotahist.parquet")
