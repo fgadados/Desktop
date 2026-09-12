@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from etl import cvm_common, http_cache
+from etl import avisos, cvm_common, http_cache
 from etl.contracts import CABECALHO, COMPOSICAO_CAPITAL, CONTRATOS_DEMONSTRATIVO
 
 # dfp_cia_aberta_BPA_con_2023.csv -> (dfp, BPA, con, 2023)
@@ -74,11 +74,18 @@ def extrair_ano(doc: str, url_pacote: str) -> dict[str, pd.DataFrame]:
     for nome in cvm_common.nomes_no_zip(zip_path):
         meta = _decompor(nome)
         if meta is None:
-            # Arquivo novo no pacote: parar, nao ignorar em silencio.
-            raise cvm_common.RastreabilidadeError(
-                f"{zip_path.name}: arquivo '{nome}' nao reconhecido pelo padrao "
-                "de nomes da CVM. Atualize etl/cvm_demonstracoes._PADRAO."
+            # Arquivo novo no pacote: registrado e pulado. Nao e silencio --
+            # fica no relatorio de avisos e na tabela `aviso` do banco. Nenhum
+            # numero ja lido fica errado por causa dele; o que ha e dado
+            # potencialmente faltando, e derrubar o pacote inteiro por isso
+            # custa mais do que protege. Ver `etl/avisos.py`.
+            avisos.avisar(
+                zip_path.name, "arquivo_desconhecido",
+                f"'{nome}' nao casa com o padrao de nomes da CVM e foi pulado. "
+                "Se for um demonstrativo novo, declare-o em "
+                "etl/cvm_demonstracoes._PADRAO para que passe a ser lido.",
             )
+            continue
 
         if meta["tipo"] == TIPO_PARECER:
             # Parecer do auditor: texto corrido, com quebra de linha dentro de

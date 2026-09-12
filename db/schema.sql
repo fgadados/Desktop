@@ -278,6 +278,19 @@ CREATE TABLE IF NOT EXISTS gatilho_resultado (
 );
 
 -- ---------------------------------------------------------------------------
+-- Avisos: divergencias que NAO tornam numero nenhum errado
+-- ---------------------------------------------------------------------------
+-- Ver etl/avisos.py. Falha dura quando a suposicao errada produziria numero
+-- errado; aviso quando produziria numero faltando ou nao conferido. Aviso nao
+-- e silencio: fica aqui, consultavel.
+CREATE TABLE IF NOT EXISTS aviso (
+    origem        VARCHAR NOT NULL,
+    categoria     VARCHAR NOT NULL,
+    mensagem      VARCHAR NOT NULL,
+    registrado_em VARCHAR NOT NULL
+);
+
+-- ---------------------------------------------------------------------------
 -- Execucao do pipeline
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS execucao (

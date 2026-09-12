@@ -27,8 +27,8 @@ import yaml
 
 from db import load
 from etl import (
-    b3_cotahist, b3_eventos, bcb_sgs, cvm_cadastro, cvm_demonstracoes, cvm_fca,
-    cvm_ipe, provenance,
+    avisos, b3_cotahist, b3_eventos, bcb_sgs, cvm_cadastro, cvm_demonstracoes,
+    cvm_fca, cvm_ipe, provenance,
 )
 from etl.config import CONFIG_DIR, PARQUET
 from transform import depara, indicators, lineage, pipeline, prices, risk, sector, triggers
@@ -101,6 +101,7 @@ def extrair(args) -> int:
 
     print(f"\n{len(provenance.manifesto())} arquivos no manifesto de proveniencia "
           f"({time.monotonic() - inicio_total:.0f}s no total).")
+    print(avisos.resumo())
     if not falhas:
         return 0
 
@@ -187,6 +188,7 @@ def transformar(args) -> int:
     _carregar_indicadores(con, fatos, plano_por_cnpj)
     _carregar_acoes(con, cnpjs)
     _carregar_fontes(con)
+    load.substituir(con, "aviso", avisos.para_quadro())
     load.registrar_execucao(con, "transformar", n, observacao=f"{len(cnpjs)} empresas")
 
     identidades = resultado["identidades"]

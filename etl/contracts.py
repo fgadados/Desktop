@@ -39,6 +39,18 @@ class Contrato:
     opcionais: tuple[str, ...] = field(default=())
 
     def validar(self, colunas_reais, *, strict: bool = True) -> None:
+        """Confere as colunas do arquivo real contra as declaradas.
+
+        Coluna DECLARADA E AUSENTE e falha dura: o codigo leria o campo errado
+        ou nenhum, e isso produz numero errado.
+
+        Coluna NOVA, presente e nao declarada, e apenas aviso. O CSV e por
+        cabecalho nomeado, entao uma coluna a mais nao desloca nada: nenhum
+        numero fica incorreto. Derrubar a extracao inteira porque a CVM
+        acrescentou um campo custa caro e nao protege nada. Ver `etl/avisos.py`.
+        """
+        from etl import avisos
+
         reais = tuple(colunas_reais)
         esperadas = set(self.colunas)
         obtidas = set(reais)
@@ -46,10 +58,18 @@ class Contrato:
         faltando = sorted(esperadas - obtidas - set(self.opcionais))
         sobrando = sorted(obtidas - esperadas)
 
-        if faltando or (sobrando and strict):
+        if sobrando and strict and not faltando:
+            avisos.avisar(
+                self.nome, "coluna_nova",
+                f"colunas presentes no arquivo e nao declaradas: {sobrando}. "
+                "Nenhum valor fica incorreto -- o CSV e por cabecalho nomeado. "
+                "Declare-as em etl/contracts.py se forem passar a ser usadas.",
+            )
+            sobrando = []
+
+        if faltando:
             partes = [f"contrato '{self.nome}' nao bate com o arquivo real."]
-            if faltando:
-                partes.append(f"  colunas ausentes no arquivo: {faltando}")
+            partes.append(f"  colunas ausentes no arquivo: {faltando}")
             if sobrando:
                 partes.append(f"  colunas presentes e nao declaradas: {sobrando}")
             partes.append(f"  declarado a partir de: {self.origem}")

@@ -29,7 +29,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from etl import cvm_common, http_cache, provenance
+from etl import avisos, cvm_common, http_cache, provenance
 from etl.config import COTAHIST_ANO_INICIAL, COTAHIST_URL
 
 TAMANHO_REGISTRO = 245
@@ -143,29 +143,52 @@ def _parse_linhas(linhas: list[bytes], origem: str) -> pd.DataFrame:
 # Posicoes 32-42 do trailer (1-based) trazem a contagem de registros.
 TRAILER_TOTAL = slice(31, 42)
 
+# Divergencia acima disto e sinal de download truncado -- ai sim falha dura.
+# Abaixo, vira aviso: nenhum numero fica errado por causa da contagem do
+# rodape, e derrubar a extracao por isso custa caro sem proteger nada.
+TOLERANCIA_TRAILER = 16
+
 
 def _conferir_trailer(trailer: bytes, n_dados: int, origem: str) -> None:
-    """Confere a contagem declarada no trailer contra os registros lidos.
+    """Confere a contagem do rodape contra os registros lidos.
 
-    CONFRONTADO com arquivo real (COTAHIST_A2025, 12/09/2026): o total do
-    trailer e o numero de registros de DADOS -- nao inclui o header nem o
-    proprio trailer. A versao anterior assumia o contrario e acusava
-    diferenca de exatamente 2 num arquivo integro.
+    Convencao, confrontada com arquivos reais em 12/09/2026:
 
-    E a checagem que pega download truncado, onde a diferenca seria de
-    milhares. Trailer sem contagem legivel na posicao esperada nao inventa
-    veredito: nao ha o que conferir.
+        COTAHIST_A2020: declara 1.251.648, dados 1.251.646  -> +2
+        COTAHIST_A2024: declara 2.635.563, dados 2.635.561  -> +2
+        COTAHIST_A2025: declara 3.174.698, dados 3.174.698  ->  0
+
+    Ou seja, o total inclui header e trailer -- e o arquivo do ano CORRENTE,
+    que a B3 ainda atualiza, estava internamente inconsistente por 2
+    registros. Generalizar a partir desse unico ponto foi o erro da versao
+    anterior.
+
+    Por isso a checagem deixou de ser fatal para diferenca pequena. Ela
+    protege contra download truncado, onde a diferenca e de milhares; contra
+    isso, `_parse_linhas` ja exige que o tamanho total seja multiplo exato de
+    245 bytes, que e a barreira de verdade. Ver `etl/avisos.py`.
     """
     declarado = trailer[TRAILER_TOTAL].decode("latin-1").strip()
     if not declarado.isdigit():
         return
 
     esperado = int(declarado)
-    if esperado != n_dados:
+    diferenca = esperado - (n_dados + 2)  # +2: header e trailer
+    if diferenca == 0:
+        return
+
+    if abs(diferenca) > TOLERANCIA_TRAILER:
         raise CotahistError(
-            f"{origem}: trailer declara {esperado} registros de dados, "
-            f"lidos {n_dados}. Sinal de download truncado ou arquivo corrompido."
+            f"{origem}: rodape declara {esperado} registros, lidos {n_dados + 2} "
+            f"(diferenca de {diferenca}). Sinal de download truncado."
         )
+
+    avisos.avisar(
+        origem, "trailer_cotahist",
+        f"rodape declara {esperado} registros e foram lidos {n_dados + 2} "
+        f"(diferenca de {diferenca}). Acontece no arquivo do ano corrente, que "
+        "a B3 atualiza durante o ano. Nenhum valor fica incorreto por isso.",
+    )
 
 
 def parse_bytes(conteudo: bytes, origem: str, sha256: str) -> pd.DataFrame:

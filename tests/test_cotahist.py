@@ -82,10 +82,42 @@ def test_arquivo_sem_header_levanta():
         cot.parse_bytes(conteudo, "teste.txt", "x" * 64)
 
 
-def test_trailer_com_contagem_divergente_levanta():
+def test_trailer_com_contagem_muito_divergente_levanta():
+    """Diferenca grande e assinatura de download truncado: falha dura."""
     conteudo = arquivo([registro_cotacao(), registro_cotacao(codneg="OUTR4")], total=99)
-    with pytest.raises(cot.CotahistError, match="trailer declara"):
+    with pytest.raises(cot.CotahistError, match="truncado"):
         cot.parse_bytes(conteudo, "teste.txt", "x" * 64)
+
+
+def test_trailer_fora_por_poucos_vira_aviso_e_nao_derruba():
+    """O caso do arquivo do ano corrente, que a B3 atualiza durante o ano.
+
+    Nenhum valor fica incorreto por causa da contagem do rodape, entao a
+    extracao segue -- com o desencontro registrado, nao engolido.
+    """
+    from etl import avisos
+
+    avisos.limpar()
+    # Convencao real: o total inclui header e trailer, logo len+2. Aqui a
+    # contagem vem 2 a menos, exatamente como no COTAHIST_A2025.
+    conteudo = arquivo([registro_cotacao(), registro_cotacao(codneg="OUTR4")], total=2)
+    df = cot.parse_bytes(conteudo, "COTAHIST_A2026.TXT", "x" * 64)
+
+    assert len(df) == 2, "os registros tem que ser lidos apesar do desencontro"
+    registrados = avisos.registrados()
+    assert len(registrados) == 1
+    assert registrados[0].categoria == "trailer_cotahist"
+    assert "COTAHIST_A2026.TXT" in registrados[0].origem
+    avisos.limpar()
+
+
+def test_trailer_na_convencao_correta_nao_gera_aviso():
+    """2020 e 2024 reais: o total declarado e len(dados) + 2."""
+    from etl import avisos
+
+    avisos.limpar()
+    cot.parse_bytes(arquivo([registro_cotacao()], total=3), "t.txt", "x" * 64)
+    assert avisos.registrados() == []
 
 
 def test_linhagem_aponta_para_a_linha_fisica():
