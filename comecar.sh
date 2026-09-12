@@ -3,6 +3,7 @@
 # Instala tudo e abre a interface. Um comando so.
 #
 #     ./comecar.sh          instala, roda o demo e abre a interface
+#     ./comecar.sh pagina   gera empresas.html + empresas.csv e para
 #     ./comecar.sh teste    instala e roda so a bateria de testes
 #     ./comecar.sh real     instala e baixa os dados REAIS da CVM/B3/BCB
 #
@@ -170,6 +171,17 @@ case "$MODO" in
     "$VPY" run.py extrair
     "$VPY" run.py transformar
     BANCO="data/b3dss.duckdb"
+    ;;
+
+  pagina)
+    # Um arquivo HTML e um CSV. Sem servidor, sem interface, sem terminal
+    # depois: abre com dois cliques no Finder.
+    if [ ! -f data/b3dss.duckdb ] && [ ! -f data/demo.duckdb ]; then
+      info "Nenhum banco ainda. Montando o cenario de demonstracao..."
+      "$VPY" run.py demo > /dev/null
+    fi
+    "$VPY" run.py pagina
+    exit 0
     ;;
 
   demo|"")

@@ -6,6 +6,7 @@
     python run.py tudo               # extrair + transformar
     python run.py diagnostico        # so imprime o estado, sem escrever nada
     python run.py demo               # roda tudo com dados SINTETICOS, sem rede
+    python run.py pagina             # gera empresas.html + empresas.csv
 
 Cada etapa e separada de proposito: a extracao depende de rede e e a unica
 parte nao reproduzivel offline. `transformar` roda inteiramente a partir dos
@@ -443,10 +444,44 @@ def _demo_precos(con, cnpj: str) -> None:
                     pd.DataFrame([{"ticker": "DEMO3", "status": status, "motivo": motivo}]))
 
 
+def pagina(args) -> int:
+    """Gera um arquivo HTML autossuficiente + um CSV, sem servidor nenhum."""
+    import export_pagina
+    from etl.config import DATA, DUCKDB_PATH
+
+    banco = Path(args.banco) if getattr(args, "banco", None) else DUCKDB_PATH
+    if not banco.exists():
+        alternativa = DATA / "demo.duckdb"
+        if alternativa.exists():
+            banco = alternativa
+        else:
+            print(f"nenhum banco encontrado em {banco}. Rode 'python run.py demo' "
+                  "ou 'python run.py tudo' antes.", file=sys.stderr)
+            return 1
+
+    destino_html = Path(args.saida) if getattr(args, "saida", None) else Path("empresas.html")
+    destino_csv = destino_html.with_suffix(".csv")
+    r = export_pagina.exportar(banco, destino_html, destino_csv)
+
+    print(f"  banco de origem : {banco}")
+    print(f"  linhas          : {r['linhas']:,}".replace(",", "."))
+    print(f"  empresas        : {r['empresas']}")
+    print()
+    print(f"  HTML : {destino_html.resolve()}")
+    print(f"  CSV  : {destino_csv.resolve()}")
+    print()
+    print("  Abra o HTML com dois cliques no Finder. Nao precisa de terminal.")
+    return 0
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="comando", required=True)
+    pag = sub.add_parser("pagina")
+    pag.add_argument("--banco", help="caminho do .duckdb (padrao: data/b3dss.duckdb)")
+    pag.add_argument("--saida", help="arquivo HTML de saida (padrao: empresas.html)")
+    pag.set_defaults(fn=pagina)
     sub.add_parser("extrair").set_defaults(fn=extrair)
     sub.add_parser("transformar").set_defaults(fn=transformar)
     sub.add_parser("diagnostico").set_defaults(fn=diagnostico)
