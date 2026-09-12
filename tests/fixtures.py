@@ -65,15 +65,32 @@ def fato(
     }
 
 
-def quadro(linhas: list[dict], arquivo: str = "dfp_cia_aberta_DRE_con_2023.csv") -> pd.DataFrame:
-    """Monta o DataFrame com as colunas de proveniencia, como sai do ETL."""
+def nome_csv(doc: str, demonstrativo: str, base: str, ano: int) -> str:
+    """Nome do CSV dentro do ZIP, no padrao da CVM."""
+    return f"{doc.lower()}_cia_aberta_{demonstrativo}_{base.lower()}_{ano}.csv"
+
+
+def quadro(linhas: list[dict]) -> pd.DataFrame:
+    """Monta o DataFrame com as colunas de proveniencia, como sai do ETL.
+
+    Cada combinacao (documento, demonstrativo, base, ano) vira um arquivo
+    proprio e e numerada a partir da linha 2, exatamente como a CVM entrega e
+    como `etl.cvm_demonstracoes` le. Carimbar um nome so para tudo faria a
+    linhagem do fixture mentir -- um saldo de BPP apontando para o CSV da DRE.
+    """
     df = pd.DataFrame(linhas)
     for c in COLUNAS_BASE:
         if c not in df.columns:
             df[c] = None
-    df["src_archive"] = arquivo.replace(".csv", ".zip")
-    df["src_file"] = arquivo
-    df["src_line"] = range(2, 2 + len(df))
+
+    df["src_file"] = [
+        nome_csv(d, dem, b, a)
+        for d, dem, b, a in zip(df["doc"], df["demonstrativo"], df["base"], df["ano_arquivo"])
+    ]
+    df["src_archive"] = [
+        f"{d.lower()}_cia_aberta_{a}.zip" for d, a in zip(df["doc"], df["ano_arquivo"])
+    ]
+    df["src_line"] = df.groupby("src_file", sort=False).cumcount() + 2
     df["src_sha256"] = "0" * 64
     return df
 
