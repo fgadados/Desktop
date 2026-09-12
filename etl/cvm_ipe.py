@@ -41,10 +41,10 @@ def extrair(anos: list[int] | None = None) -> Path:
                 keep_default_na=False, na_values=[""],
             )
             IPE.validar(df.columns, strict=False)
-            cvm_common._conferir_linhas(bruto, len(df), p.name)
+            linhas = cvm_common.numeros_de_linha(bruto, len(df), p.name)
             quadros.append(
                 provenance.anotar_origem(
-                    df, archive=p.name, file=p.name, sha256=fonte.sha256, primeira_linha=2
+                    df, archive=p.name, file=p.name, sha256=fonte.sha256, linhas=linhas
                 )
             )
 

@@ -96,6 +96,35 @@ CREATE TABLE IF NOT EXISTS depara_divergencia (
 );
 
 -- ---------------------------------------------------------------------------
+-- Acoes em circulacao (CVM/composicao_capital)
+-- ---------------------------------------------------------------------------
+-- acoes_em_circulacao = capital integralizado - tesouraria. E a base de P/L e
+-- P/VP; papel em tesouraria nao participa de lucro por acao.
+CREATE TABLE IF NOT EXISTS acoes_em_circulacao (
+    cnpj                     VARCHAR NOT NULL,
+    dt_refer                 DATE NOT NULL,
+    doc                      VARCHAR NOT NULL,
+    versao                   INTEGER,
+    acoes_ordinarias         DOUBLE,
+    acoes_preferenciais      DOUBLE,
+    acoes_total              DOUBLE,
+    tesouraria_ordinarias    DOUBLE,
+    tesouraria_preferenciais DOUBLE,
+    tesouraria_total         DOUBLE,
+    acoes_em_circulacao      DOUBLE,
+    src_file                 VARCHAR,
+    src_line                 BIGINT,
+    PRIMARY KEY (cnpj, dt_refer, doc)
+);
+
+CREATE TABLE IF NOT EXISTS acoes_inconsistencia (
+    cnpj      VARCHAR NOT NULL,
+    dt_refer  DATE NOT NULL,
+    problema  VARCHAR NOT NULL,
+    detalhe   VARCHAR
+);
+
+-- ---------------------------------------------------------------------------
 -- Precos
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS preco_diario (

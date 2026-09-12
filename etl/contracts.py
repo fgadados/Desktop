@@ -158,10 +158,25 @@ CABECALHO = Contrato(
 # modulo existe para impedir.
 COMPOSICAO_CAPITAL = Contrato(
     "cvm_composicao_capital",
-    ("CNPJ_CIA", "DT_REFER", "VERSAO", "DENOM_CIA", "CD_CVM"),
+    (
+        "CNPJ_CIA",
+        "DT_REFER",
+        "VERSAO",
+        "DENOM_CIA",
+        # Capital integralizado e tesouraria, por especie. Acoes em circulacao
+        # = integralizado - tesouraria; papel em tesouraria nao participa de
+        # lucro por acao nem de valor de mercado.
+        "QT_ACAO_ORDIN_CAP_INTEGR",
+        "QT_ACAO_PREF_CAP_INTEGR",
+        "QT_ACAO_TOTAL_CAP_INTEGR",
+        "QT_ACAO_ORDIN_TESOURO",
+        "QT_ACAO_PREF_TESOURO",
+        "QT_ACAO_TOTAL_TESOURO",
+    ),
     ("CNPJ_CIA", "DT_REFER", "VERSAO"),
-    "identificacao confirmada nos demais contratos da CVM; campos de "
-    "quantidade ainda NAO confrontados -- rode `python run.py schema`",
+    "CONFRONTADO com DFP/ITR reais em 12/09/2026. Note que este arquivo NAO "
+    "tem CD_CVM, ao contrario dos demonstrativos",
+    verificado_em="2026-09-12",
 )
 
 # Mapa demonstrativo -> contrato. As chaves sao os sufixos que aparecem no nome

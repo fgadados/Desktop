@@ -35,11 +35,11 @@ def extrair() -> Path:
         # Nao-estrito: o cadastro carrega dezenas de campos de endereco que a
         # CVM altera com frequencia e que nao usamos.
         CAD_CIA.validar(df.columns, strict=False)
-        cvm_common._conferir_linhas(bruto, len(df), Path(fonte.path).name)
+        linhas = cvm_common.numeros_de_linha(bruto, len(df), Path(fonte.path).name)
         quadros.append(
             provenance.anotar_origem(
                 df, archive=Path(fonte.path).name, file=Path(fonte.path).name,
-                sha256=fonte.sha256, primeira_linha=2,
+                sha256=fonte.sha256, linhas=linhas,
             )
         )
 

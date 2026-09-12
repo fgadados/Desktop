@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import csv
 import io
 import re
+import sys
 import zipfile
 from pathlib import Path
 
@@ -29,22 +31,53 @@ def ano_do_pacote(url: str) -> int | None:
     return int(m.group(1)) if m else None
 
 
-def _conferir_linhas(bruto: bytes, n_registros: int, nome: str) -> None:
-    """Falha se o CSV tiver quebra de linha dentro de campo.
+def numeros_de_linha(bruto: bytes, n_registros: int, nome: str) -> list[int]:
+    """Linha fisica onde cada registro comeca, 1-based, cabecalho incluso.
 
-    Sem essa garantia, `src_line` seria uma mentira e o requisito de
-    rastreabilidade cairia. Preferimos parar a exibir linha errada.
+    Existe para que `src_line` nunca minta: `sed -n '{src_line}p' arquivo.csv`
+    tem que devolver o registro exibido na interface.
+
+    Caminho rapido -- o arquivo tem exatamente `n_registros + 1` linhas
+    fisicas, logo nenhum campo contem quebra de linha e a numeracao e
+    sequencial a partir da linha 2.
+
+    Caminho lento -- ha quebra de linha dentro de campo. Isso acontece de
+    verdade: `itr_cia_aberta_DFC_MI_ind_2019.csv` e os arquivos do IPE trazem
+    texto multilinha entre aspas. Aqui o `csv.reader` da biblioteca padrao,
+    que entende aspas, informa a posicao fisica de cada registro. Mais lento,
+    mas so roda nos arquivos que precisam.
+
+    Se nem assim a contagem casar com o que o pandas leu, levanta: melhor
+    parar do que apontar para a linha errada.
     """
-    texto_linhas = bruto.count(b"\n")
+    fisicas = bruto.count(b"\n")
     if bruto and not bruto.endswith(b"\n"):
-        texto_linhas += 1
-    esperado = n_registros + 1  # cabecalho
-    if texto_linhas != esperado:
+        fisicas += 1
+
+    if fisicas == n_registros + 1:
+        return list(range(2, 2 + n_registros))
+
+    texto = io.StringIO(bruto.decode(CVM_ENCODING, errors="replace"), newline="")
+    leitor = csv.reader(texto, delimiter=CVM_SEP)
+    inicios: list[int] = []
+    fim_anterior = 0
+    for _ in leitor:
+        inicios.append(fim_anterior + 1)
+        fim_anterior = leitor.line_num
+    inicios = inicios[1:]  # descarta o cabecalho
+
+    if len(inicios) != n_registros:
         raise RastreabilidadeError(
-            f"{nome}: {texto_linhas} linhas fisicas para {n_registros} registros "
-            f"(esperado {esperado}). Ha quebra de linha dentro de campo; "
-            "src_line nao pode ser garantido."
+            f"{nome}: o leitor de CSV encontrou {len(inicios)} registros e o "
+            f"pandas {n_registros}. Os dois discordam sobre onde cada registro "
+            "comeca, entao src_line nao pode ser garantido."
         )
+    return inicios
+
+
+def _conferir_linhas(bruto: bytes, n_registros: int, nome: str) -> list[int]:
+    """Compatibilidade: devolve a numeracao em vez de so conferir."""
+    return numeros_de_linha(bruto, n_registros, nome)
 
 
 def ler_csv_do_zip(
@@ -68,14 +101,14 @@ def ler_csv_do_zip(
         na_values=[""],
     )
     contrato.validar(df.columns, strict=strict)
-    _conferir_linhas(bruto, len(df), nome_interno)
+    linhas = numeros_de_linha(bruto, len(df), nome_interno)
 
     return provenance.anotar_origem(
         df,
         archive=zip_path.name,
         file=nome_interno,
         sha256=sha256,
-        primeira_linha=2,
+        linhas=linhas,
     )
 
 

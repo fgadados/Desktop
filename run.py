@@ -135,6 +135,7 @@ def transformar(args) -> int:
             ["serie", "codigo_sgs", "data", "valor", "src_file", "src_line"]
         ])
     _carregar_indicadores(con, fatos, plano_por_cnpj)
+    _carregar_acoes(con, cnpjs)
     _carregar_fontes(con)
     load.registrar_execucao(con, "transformar", n, observacao=f"{len(cnpjs)} empresas")
 
@@ -243,6 +244,30 @@ def _carregar_indicadores(con, fatos, plano_por_cnpj) -> None:
     ent = ent.drop_duplicates(["entidade", "periodo", "indicador", "ordem"], keep="first")
     load.substituir(con, "indicador", cab)
     load.substituir(con, "indicador_entrada", ent)
+
+
+def _carregar_acoes(con, cnpjs: list[str]) -> None:
+    """Acoes em circulacao, dos pacotes DFP e ITR."""
+    from transform import shares
+
+    partes = [
+        _ler(f"cvm/{d}_composicao_capital.parquet") for d in ("dfp", "itr")
+    ]
+    partes = [p for p in partes if p is not None and not p.empty]
+    if not partes:
+        return
+
+    acoes = shares.normalizar(pd.concat(partes, ignore_index=True))
+    if cnpjs:
+        acoes = acoes[acoes["cnpj"].isin(cnpjs)]
+    if acoes.empty:
+        return
+
+    load.substituir(con, "acoes_em_circulacao", acoes)
+    problemas = shares.inconsistencias(acoes)
+    load.substituir(con, "acoes_inconsistencia", problemas)
+    print(f"  acoes em circulacao  : {len(acoes)} registro(s), "
+          f"{len(problemas)} inconsistencia(s)")
 
 
 def _carregar_fontes(con) -> None:

@@ -115,10 +115,18 @@ def pacote(tmp_path):
                  [["00.000.000/0001-91", "2023-12-31", "1", "TESTE", "1", "DFP", "9",
                    "2024-03-01", "http://x"]]),
         )
+        # Colunas conforme o arquivo real da CVM: sem CD_CVM, e as
+        # quantidades com os nomes abreviados que o orgao usa.
         zf.writestr(
             "dfp_cia_aberta_composicao_capital_2023.csv",
-            _csv(ident + ["QTD_ACAO_ORDINARIA_CAPITAL_INTEGRALIZADO"],
-                 [["00.000.000/0001-91", "2023-12-31", "1", "TESTE", "1", "1000000"]]),
+            _csv(
+                ["CNPJ_CIA", "DT_REFER", "VERSAO", "DENOM_CIA",
+                 "QT_ACAO_ORDIN_CAP_INTEGR", "QT_ACAO_PREF_CAP_INTEGR",
+                 "QT_ACAO_TOTAL_CAP_INTEGR", "QT_ACAO_ORDIN_TESOURO",
+                 "QT_ACAO_PREF_TESOURO", "QT_ACAO_TOTAL_TESOURO"],
+                [["00.000.000/0001-91", "2023-12-31", "1", "TESTE",
+                  "1000000", "500000", "1500000", "10000", "0", "10000"]],
+            ),
         )
         # Parecer: texto com quebra de linha dentro de campo, de proposito.
         zf.writestr(
@@ -140,8 +148,12 @@ def test_zip_real_e_roteado_por_tipo(pacote, monkeypatch):
     assert len(r["fatos"]) == 1
     assert r["fatos"].iloc[0]["CD_CONTA"] == "3.11"
     assert len(r["cabecalho"]) == 1
-    assert len(r["composicao_capital"]) == 1
-    assert "QTD_ACAO_ORDINARIA_CAPITAL_INTEGRALIZADO" in r["composicao_capital"].columns
+    cap = r["composicao_capital"]
+    assert len(cap) == 1
+    # Acoes em circulacao = integralizado - tesouraria.
+    assert int(cap.iloc[0]["QT_ACAO_TOTAL_CAP_INTEGR"]) == 1_500_000
+    assert int(cap.iloc[0]["QT_ACAO_TOTAL_TESOURO"]) == 10_000
+    assert "CD_CVM" not in cap.columns  # este arquivo nao tem, ao contrario dos demais
 
 
 def test_parecer_nao_entra_nos_fatos(pacote, monkeypatch):
