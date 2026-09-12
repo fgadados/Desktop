@@ -41,8 +41,12 @@ def fato(
     escala: str = "MILHAR",
     moeda: str = "REAL",
     denom: str = "COMPANHIA TESTE S.A.",
+    coluna_df: str = "",
 ) -> dict:
     return {
+        # Dimensao extra da DMPL: a mesma conta aparece uma vez por coluna do
+        # patrimonio liquido. Vazia nos demais demonstrativos.
+        "COLUNA_DF": coluna_df,
         "CNPJ_CIA": cnpj,
         "DT_REFER": dt_refer,
         "VERSAO": versao,

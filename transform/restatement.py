@@ -25,6 +25,18 @@ from etl.config import TOL_IDENTIDADE_ABS, TOL_IDENTIDADE_REL
 CHAVE_FATO = ["CNPJ_CIA", "base", "demonstrativo", "CD_CONTA", "periodo"]
 
 
+def chave_fato(df: pd.DataFrame) -> list[str]:
+    """Chave do fato, acrescida de `COLUNA_DF` quando a dimensao existir.
+
+    A DMPL abre a mesma conta em varias colunas do patrimonio liquido.
+    Sem essa dimensao na chave, a resolucao de reapresentacao manteria uma
+    coluna e descartaria as outras -- em silencio, que e o pior modo de falha.
+    """
+    if "COLUNA_DF" in df.columns:
+        return CHAVE_FATO[:3] + ["COLUNA_DF"] + CHAVE_FATO[3:]
+    return list(CHAVE_FATO)
+
+
 def resolver(df: pd.DataFrame) -> pd.DataFrame:
     """Escolhe o valor mais recente por fato e marca divergencia.
 
@@ -48,35 +60,36 @@ def resolver(df: pd.DataFrame) -> pd.DataFrame:
         )
 
     out = df.copy()
+    chave = chave_fato(out)
     out["DT_REFER_DT"] = pd.to_datetime(out["DT_REFER"], errors="raise")
     if "versao_int" not in out.columns:
         out["versao_int"] = pd.to_numeric(out["VERSAO"], errors="raise")
 
     # Publicacao mais recente = maior DT_REFER, desempate por VERSAO.
     ordenado = out.sort_values(
-        CHAVE_FATO + ["DT_REFER_DT", "versao_int"], ascending=True, kind="mergesort"
+        chave + ["DT_REFER_DT", "versao_int"], ascending=True, kind="mergesort"
     )
-    escolhido = ordenado.groupby(CHAVE_FATO, dropna=False, as_index=False).tail(1).copy()
+    escolhido = ordenado.groupby(chave, dropna=False, as_index=False).tail(1).copy()
     escolhido["valor_restated"] = escolhido["VL_CONTA_NUM"]
     escolhido["dt_refer_usada"] = escolhido["DT_REFER"]
 
     # As-filed: a linha ULTIMO, isto e, o documento do proprio exercicio.
     as_filed = (
         ordenado[ordenado["ordem_exerc_norm"] == "ULTIMO"]
-        .groupby(CHAVE_FATO, dropna=False, as_index=False)
-        .tail(1)[CHAVE_FATO + ["VL_CONTA_NUM", "DT_REFER"]]
+        .groupby(chave, dropna=False, as_index=False)
+        .tail(1)[chave + ["VL_CONTA_NUM", "DT_REFER"]]
         .rename(columns={"VL_CONTA_NUM": "valor_as_filed", "DT_REFER": "dt_refer_as_filed"})
     )
 
     n_pub = (
-        ordenado.groupby(CHAVE_FATO, dropna=False)["DT_REFER"]
+        ordenado.groupby(chave, dropna=False)["DT_REFER"]
         .nunique()
         .rename("n_publicacoes")
         .reset_index()
     )
 
-    res = escolhido.merge(as_filed, on=CHAVE_FATO, how="left").merge(
-        n_pub, on=CHAVE_FATO, how="left"
+    res = escolhido.merge(as_filed, on=chave, how="left").merge(
+        n_pub, on=chave, how="left"
     )
 
     dif = (res["valor_restated"] - res["valor_as_filed"]).abs()
@@ -92,7 +105,7 @@ def relatorio_divergencias(df: pd.DataFrame) -> pd.DataFrame:
     """So os fatos reapresentados, prontos para a tela de sinalizacao."""
     if df.empty or "divergente" not in df.columns:
         return pd.DataFrame()
-    cols = CHAVE_FATO + [
+    cols = chave_fato(df) + [
         "DS_CONTA", "valor_as_filed", "valor_restated", "dt_refer_as_filed",
         "dt_refer_usada", "n_publicacoes", "src_file", "src_line",
     ]

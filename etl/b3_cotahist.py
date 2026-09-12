@@ -20,6 +20,7 @@ O arquivo NAO e ajustado por evento corporativo. O ajuste vive em
 
 from __future__ import annotations
 
+import re
 import time
 import zipfile
 from dataclasses import dataclass
@@ -139,6 +140,34 @@ def _parse_linhas(linhas: list[bytes], origem: str) -> pd.DataFrame:
     return pd.DataFrame(dados)
 
 
+# Posicoes 32-42 do trailer (1-based) trazem a contagem de registros.
+TRAILER_TOTAL = slice(31, 42)
+
+
+def _conferir_trailer(trailer: bytes, n_dados: int, origem: str) -> None:
+    """Confere a contagem declarada no trailer contra os registros lidos.
+
+    CONFRONTADO com arquivo real (COTAHIST_A2025, 12/09/2026): o total do
+    trailer e o numero de registros de DADOS -- nao inclui o header nem o
+    proprio trailer. A versao anterior assumia o contrario e acusava
+    diferenca de exatamente 2 num arquivo integro.
+
+    E a checagem que pega download truncado, onde a diferenca seria de
+    milhares. Trailer sem contagem legivel na posicao esperada nao inventa
+    veredito: nao ha o que conferir.
+    """
+    declarado = trailer[TRAILER_TOTAL].decode("latin-1").strip()
+    if not declarado.isdigit():
+        return
+
+    esperado = int(declarado)
+    if esperado != n_dados:
+        raise CotahistError(
+            f"{origem}: trailer declara {esperado} registros de dados, "
+            f"lidos {n_dados}. Sinal de download truncado ou arquivo corrompido."
+        )
+
+
 def parse_bytes(conteudo: bytes, origem: str, sha256: str) -> pd.DataFrame:
     linhas = [l for l in conteudo.split(b"\n") if l.strip(b"\r\x00")]
     linhas = [l.rstrip(b"\r") for l in linhas]
@@ -152,16 +181,7 @@ def parse_bytes(conteudo: bytes, origem: str, sha256: str) -> pd.DataFrame:
         raise CotahistError(f"{origem}: ultimo registro nao e trailer (TIPREG=99)")
     trailer, corpo = corpo[-1], corpo[:-1]
 
-    # Trailer: posicoes 32-42 trazem o total de registros do arquivo.
-    declarado = trailer[31:42].decode("latin-1").strip()
-    if declarado.isdigit():
-        # O total do trailer inclui header e trailer.
-        esperado = int(declarado)
-        obtido = len(corpo) + 2
-        if esperado != obtido:
-            raise CotahistError(
-                f"{origem}: trailer declara {esperado} registros, lidos {obtido}"
-            )
+    _conferir_trailer(trailer, len(corpo), origem)
 
     df = _parse_linhas(corpo, origem)
 

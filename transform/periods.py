@@ -213,7 +213,16 @@ def somente_isolados(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _chave_conta(df: pd.DataFrame) -> list[str]:
-    return ["CNPJ_CIA", "base", "demonstrativo", "CD_CONTA", "ano_exercicio"]
+    """Granularidade de um fato contabil dentro de um exercicio.
+
+    `COLUNA_DF` entra porque a DMPL abre a mesma conta em varias colunas do
+    patrimonio liquido; sem ela a chave nao e unica e a derivacao do Q4 tenta
+    um casamento N-para-N.
+    """
+    base = ["CNPJ_CIA", "base", "demonstrativo", "CD_CONTA", "ano_exercicio"]
+    if "COLUNA_DF" in df.columns:
+        base.insert(-1, "COLUNA_DF")
+    return base
 
 
 def derivar_q4(df: pd.DataFrame) -> pd.DataFrame:

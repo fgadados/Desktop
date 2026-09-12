@@ -42,8 +42,15 @@ def registro_cotacao(
 
 
 def arquivo(registros: list[bytes], total: int | None = None) -> bytes:
+    """Monta um COTAHIST completo: header, registros e trailer.
+
+    A contagem do trailer e o numero de registros de DADOS -- confrontado com
+    COTAHIST_A2025 real em 12/09/2026. O fixture antes escrevia len+2, o que
+    era a suposicao errada do parser espelhada no teste: os dois concordavam
+    entre si e discordavam do arquivo da B3.
+    """
     header = ("00COTAHIST.2024BOVESPA 20240102" + " " * 214).encode("latin-1")[:245]
-    n = total if total is not None else len(registros) + 2
+    n = total if total is not None else len(registros)
     trailer = ("99COTAHIST.2024BOVESPA 20240102" + str(n).rjust(11, "0")).ljust(245).encode("latin-1")
     return b"\r\n".join([header] + registros + [trailer]) + b"\r\n"
 

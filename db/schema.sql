@@ -29,6 +29,10 @@ CREATE TABLE IF NOT EXISTS fato_contabil (
     periodo           VARCHAR NOT NULL,   -- 2023 | 2023T3
     tipo_janela       VARCHAR NOT NULL,
     origem_periodo    VARCHAR NOT NULL,   -- DIRETO | DERIVADO_Q4
+    -- Dimensao extra da DMPL: a mesma conta aparece uma vez por coluna do
+    -- patrimonio liquido (Capital Social, Reservas, Lucros Acumulados...).
+    -- Vazio nos demais demonstrativos.
+    coluna_df         VARCHAR NOT NULL DEFAULT '',
     cd_conta          VARCHAR NOT NULL,
     ds_conta          VARCHAR,
     valor             DOUBLE,
@@ -51,7 +55,7 @@ CREATE TABLE IF NOT EXISTS fato_contabil (
     src_line          BIGINT,
     src_sha256        VARCHAR,
     src_derivacao     VARCHAR,            -- JSON, preenchido no Q4 derivado
-    PRIMARY KEY (cnpj, base, demonstrativo, periodo, cd_conta)
+    PRIMARY KEY (cnpj, base, demonstrativo, periodo, cd_conta, coluna_df)
 );
 
 -- ---------------------------------------------------------------------------

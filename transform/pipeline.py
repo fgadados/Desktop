@@ -21,9 +21,31 @@ import pandas as pd
 from transform import basis, dedup, money, periods, restatement, validations
 
 
+def garantir_coluna_df(df: pd.DataFrame) -> pd.DataFrame:
+    """`COLUNA_DF` faz parte da granularidade do fato, e so a DMPL a tem.
+
+    A DMPL (mutacoes do patrimonio liquido) abre cada conta em colunas --
+    Capital Social, Reservas de Lucro, Lucros Acumulados, etc. -- entao o
+    mesmo CD_CONTA aparece varias vezes no mesmo periodo, uma por coluna.
+
+    Sem esta dimensao na chave, duas coisas quebram: a derivacao do Q4 tenta
+    casar N linhas com N linhas, e -- pior, porque e silenciosa -- a
+    resolucao de reapresentacao mantem uma coluna e descarta as outras.
+
+    Demonstrativos sem essa dimensao recebem string vazia, para que a chave
+    tenha o mesmo formato em todos.
+    """
+    out = df.copy()
+    if "COLUNA_DF" not in out.columns:
+        out["COLUNA_DF"] = ""
+    else:
+        out["COLUNA_DF"] = out["COLUNA_DF"].fillna("").astype(str).str.strip()
+    return out
+
+
 def normalizar_fatos(fatos_brutos: pd.DataFrame) -> dict[str, pd.DataFrame]:
     """Aplica as seis regras e devolve os quadros prontos para carga."""
-    em_reais = money.converter(fatos_brutos)
+    em_reais = money.converter(garantir_coluna_df(fatos_brutos))
     em_reais, outra_moeda = money.somente_moeda_esperada(em_reais)
 
     # Regras 2 e 3. PENULTIMO e mantido porque `restatement` precisa dele.
@@ -81,6 +103,7 @@ COLUNAS_FATO_DB = {
     "periodo": "periodo",
     "tipo_janela": "tipo_janela",
     "origem_periodo": "origem_periodo",
+    "COLUNA_DF": "coluna_df",
     "CD_CONTA": "cd_conta",
     "DS_CONTA": "ds_conta",
     "VL_CONTA_NUM": "valor",
