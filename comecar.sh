@@ -22,12 +22,34 @@ info() { echo "${AMAR}→${FIM} $*"; }
 # ---------------------------------------------------------------------------
 # 1. Python 3.11 ou mais novo
 # ---------------------------------------------------------------------------
+# Procura tambem nos caminhos do Homebrew: recem-instalado, o brew pode ainda
+# nao estar no PATH da sessao (no Apple Silicon exige `brew shellenv`).
+CANDIDATOS=(python3.13 python3.12 python3.11
+            /opt/homebrew/bin/python3.13 /opt/homebrew/bin/python3.12
+            /opt/homebrew/bin/python3.11
+            /usr/local/bin/python3.13 /usr/local/bin/python3.12
+            /usr/local/bin/python3.11
+            python3)
+
+versao_de() { "$1" -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null; }
+
 achar_python() {
-  for c in python3.13 python3.12 python3.11 python3; do
-    if command -v "$c" >/dev/null 2>&1; then
-      if "$c" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' 2>/dev/null; then
-        echo "$c"; return 0
-      fi
+  for c in "${CANDIDATOS[@]}"; do
+    command -v "$c" >/dev/null 2>&1 || continue
+    v="$(versao_de "$c")" || continue
+    [ -n "$v" ] || continue
+    # 3.11 a 3.13: faixa com wheels publicados para pandas, pyarrow e duckdb.
+    case "$v" in
+      3.11|3.12|3.13) echo "$c"; return 0 ;;
+    esac
+  done
+  # Nenhuma versao da faixa: aceita 3.14+ avisando, porque ali a instalacao
+  # pode tentar compilar pyarrow/duckdb do zero e falhar de forma obscura.
+  for c in "${CANDIDATOS[@]}"; do
+    command -v "$c" >/dev/null 2>&1 || continue
+    v="$(versao_de "$c")" || continue
+    if "$c" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' 2>/dev/null; then
+      echo "$c"; return 0
     fi
   done
   return 1
@@ -37,15 +59,30 @@ if ! PY="$(achar_python)"; then
   erro "Python 3.11 ou mais novo nao encontrado."
   echo
   echo "  No macOS, instale com Homebrew:"
-  echo "      brew install python@3.11"
+  echo "      brew install python@3.12"
   echo
   echo "  Se nao tiver Homebrew, instale-o primeiro:"
   echo '      /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
   echo
-  echo "  Depois rode este script de novo."
+  echo "  Ja instalou o Python pelo brew e mesmo assim apareceu esta mensagem?"
+  echo "  O brew pode nao estar no PATH desta janela. Rode:"
+  echo '      eval "$(/opt/homebrew/bin/brew shellenv)"'
+  echo "  e chame este script de novo."
   exit 1
 fi
-ok "Python encontrado: $PY ($("$PY" --version 2>&1))"
+PYVER="$(versao_de "$PY")"
+ok "Python encontrado: $PY ($PYVER)"
+
+case "$PYVER" in
+  3.11|3.12|3.13) ;;
+  *)
+    echo
+    info "Python $PYVER e mais novo que a faixa testada (3.11 a 3.13)."
+    info "Se a instalacao falhar tentando compilar pyarrow ou duckdb, e isto."
+    info "Solucao: brew install python@3.12, apague a pasta .venv e rode de novo."
+    echo
+    ;;
+esac
 
 # ---------------------------------------------------------------------------
 # 2. Ambiente virtual e dependencias
@@ -56,9 +93,26 @@ if [ ! -d .venv ]; then
 fi
 
 VPY=".venv/bin/python"
+if [ ! -x "$VPY" ]; then
+  erro "O ambiente virtual em .venv/ esta incompleto (nao achei $VPY)."
+  echo "  Apague a pasta e rode de novo:   rm -rf .venv && ./comecar.sh"
+  exit 1
+fi
+
 info "Instalando dependencias..."
-"$VPY" -m pip install --quiet --upgrade pip
-"$VPY" -m pip install --quiet -e ".[dev]"
+if ! "$VPY" -m pip install --quiet --upgrade pip 2>&1 \
+   || ! "$VPY" -m pip install -e ".[dev]" > /tmp/b3dss-pip.log 2>&1; then
+  erro "A instalacao das dependencias falhou."
+  echo
+  echo "  Ultimas linhas do erro:"
+  tail -25 /tmp/b3dss-pip.log 2>/dev/null | sed 's/^/      /'
+  echo
+  echo "  Log completo em /tmp/b3dss-pip.log"
+  echo "  Se aparecer 'building wheel' seguido de erro de compilador, o Python"
+  echo "  desta maquina e mais novo que os pacotes suportam. Rode:"
+  echo "      brew install python@3.12 && rm -rf .venv && ./comecar.sh"
+  exit 1
+fi
 ok "Dependencias instaladas"
 
 # ---------------------------------------------------------------------------
@@ -100,8 +154,37 @@ case "$MODO" in
     BANCO="data/demo.duckdb"
     ;;
 
+  diagnostico)
+    echo
+    echo "===== DIAGNOSTICO -- cole esta saida inteira ao pedir ajuda ====="
+    echo "sistema     : $(uname -srm)"
+    [ "$(uname -s)" = "Darwin" ] && echo "macOS       : $(sw_vers -productVersion 2>/dev/null) ($(uname -m))"
+    echo "shell       : ${BASH_VERSION:-desconhecido}"
+    echo "diretorio   : $RAIZ"
+    echo "git         : $(git --version 2>&1 | head -1)"
+    echo "branch      : $(git rev-parse --abbrev-ref HEAD 2>&1)"
+    echo "commit      : $(git rev-parse --short HEAD 2>&1)"
+    echo "python usado: $PY ($PYVER)"
+    echo "pythons no PATH:"
+    for c in python3 python3.11 python3.12 python3.13 python3.14; do
+      if command -v "$c" >/dev/null 2>&1; then
+        echo "    $(command -v "$c")  ->  $("$c" --version 2>&1)"
+      fi
+    done
+    echo "pacotes instalados:"
+    "$VPY" -m pip list 2>/dev/null \
+      | grep -iE '^(pandas|pyarrow|duckdb|streamlit|requests|PyYAML|altair|pytest) ' \
+      | sed 's/^/    /' || echo "    (nenhum)"
+    echo "bancos existentes:"
+    ls -la data/*.duckdb 2>/dev/null | sed 's/^/    /' || echo "    (nenhum)"
+    echo "espaco em disco:"
+    df -h . 2>/dev/null | tail -1 | sed 's/^/    /'
+    echo "================================================================"
+    exit 0
+    ;;
+
   *)
-    erro "Modo desconhecido: '$MODO'. Use: demo, teste ou real."
+    erro "Modo desconhecido: '$MODO'. Use: demo, teste, real ou diagnostico."
     exit 1
     ;;
 esac
