@@ -3,9 +3,10 @@
 # Instala tudo e abre a interface. Um comando so.
 #
 #     ./comecar.sh          instala, roda o demo e abre a interface
-#     ./comecar.sh pagina   gera empresas.html + empresas.csv e para
+#     ./comecar.sh pagina   gera empresas.html + empresas.csv e abre
 #     ./comecar.sh teste    instala e roda so a bateria de testes
 #     ./comecar.sh real     instala e baixa os dados REAIS da CVM/B3/BCB
+#     ./comecar.sh atalho   cria atalhos clicaveis na Mesa (macOS)
 #
 # Nao precisa saber Python para rodar isto. O script recusa seguir se algo
 # estiver faltando e diz o que fazer -- nunca continua pela metade.
@@ -181,6 +182,36 @@ case "$MODO" in
       "$VPY" run.py demo > /dev/null
     fi
     "$VPY" run.py pagina
+    # No macOS, abre o arquivo no navegador direto -- o objetivo aqui e nao
+    # precisar de terminal depois.
+    if command -v open >/dev/null 2>&1 && [ -f empresas.html ]; then
+      open empresas.html
+    fi
+    exit 0
+    ;;
+
+  atalho)
+    MESA="$HOME/Desktop"
+    [ -d "$MESA" ] || MESA="$HOME"
+    criar_atalho() {  # $1 = nome do arquivo, $2 = modo do comecar.sh
+      local alvo="$MESA/$1"
+      cat > "$alvo" <<ATALHO
+#!/bin/bash
+# Atalho gerado por comecar.sh. Clique duas vezes para rodar.
+cd "$RAIZ" || { echo "Pasta do projeto nao encontrada: $RAIZ"; read -r; exit 1; }
+./comecar.sh $2
+echo
+echo "Terminado. Pode fechar esta janela."
+ATALHO
+      chmod +x "$alvo"
+      ok "$alvo"
+    }
+    criar_atalho "B3 - gerar pagina.command" "pagina"
+    criar_atalho "B3 - abrir interface.command" "demo"
+    criar_atalho "B3 - baixar dados reais.command" "real"
+    echo
+    info "Clique duas vezes em qualquer um deles na Mesa. Sem terminal, sem cd."
+    info "Na primeira vez o macOS pode pedir confirmacao: clique em Abrir."
     exit 0
     ;;
 
