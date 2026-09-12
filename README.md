@@ -48,17 +48,56 @@ contrato diverge. Ajuste `etl/contracts.py` conforme o resultado e preencha
 
 ---
 
-## Instalação e uso
+## Do zero até a tela, no macOS
+
+Três comandos. Abra o **Terminal** (⌘+Espaço, digite "Terminal") e cole um de
+cada vez:
 
 ```bash
-python3.11 -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
+git clone https://github.com/fgadados/Desktop.git b3-dss
+cd b3-dss
+git checkout claude/b3-decision-support-system-nf408g
+```
 
-python run.py demo           # roda tudo com dados SINTETICOS, sem rede
+```bash
+./comecar.sh
+```
+
+O navegador abre sozinho com a interface. É isso.
+
+O que `./comecar.sh` faz: procura Python 3.11+, cria o ambiente virtual em
+`.venv/`, instala as dependências, monta o cenário de demonstração e abre o
+Streamlit. Se faltar Python, ele para e diz como instalar — não segue pela
+metade. Para encerrar, `Ctrl+C` na janela do Terminal.
+
+**Se `git` não estiver instalado**, o macOS oferece instalar as Ferramentas de
+Linha de Comando do Xcode na primeira vez que você digitar `git`; aceite e
+repita o comando. Alternativa sem git: baixe o ZIP do branch pelo botão
+**Code → Download ZIP** na página do repositório no GitHub, descompacte, e
+rode `./comecar.sh` dentro da pasta.
+
+### Os três modos
+
+| Comando | O que faz |
+|---|---|
+| `./comecar.sh` | Cenário sintético, sem rede. Para ver o formato das telas. |
+| `./comecar.sh teste` | Roda os 118 testes e para. Sem rede. |
+| `./comecar.sh real` | Baixa CVM, B3 e BCB de verdade e abre a interface sobre o dado real. |
+
+`./comecar.sh real` roda antes a conferência dos contratos de schema contra os
+arquivos reais da CVM. Se divergir, ele **para** e mostra qual coluna mudou —
+ver **Contratos não confrontados** acima. Isso é proposital: seguir com um
+contrato errado produziria número errado em silêncio.
+
+### Uso avançado (comandos individuais)
+
+```bash
+source .venv/bin/activate
+python run.py demo           # cenário sintético, sem rede
 python run.py extrair        # baixa brutos das fontes oficiais (idempotente)
 python run.py transformar    # aplica as 6 regras e carrega o DuckDB
 python run.py diagnostico    # estado do cache, contratos e gatilhos
-streamlit run app/main.py
+B3DSS_DB=data/demo.duckdb streamlit run app/main.py
 ```
 
 O conjunto de acompanhamento fica em `config/tickers.yml`. Comece pequeno.
