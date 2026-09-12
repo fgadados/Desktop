@@ -54,6 +54,7 @@ contrato diverge. Ajuste `etl/contracts.py` conforme o resultado e preencha
 python3.11 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 
+python run.py demo           # roda tudo com dados SINTETICOS, sem rede
 python run.py extrair        # baixa brutos das fontes oficiais (idempotente)
 python run.py transformar    # aplica as 6 regras e carrega o DuckDB
 python run.py diagnostico    # estado do cache, contratos e gatilhos
@@ -61,6 +62,21 @@ streamlit run app/main.py
 ```
 
 O conjunto de acompanhamento fica em `config/tickers.yml`. Comece pequeno.
+
+### Onde está o dado
+
+Enquanto `python run.py extrair` não rodar com rede aberta, **não há dado
+nenhum** — `data/b3dss.duckdb` nem existe. O repositório contém a máquina, não
+o resultado; brutos e banco são gerados localmente e ficam fora do controle de
+versão (`.gitignore`).
+
+`python run.py demo` existe para responder "o que este sistema mostra?" sem
+esperar download: ele monta um cenário sintético no layout da CVM, roda as 6
+regras, calcula os indicadores e imprime a saída — incluindo a cadeia de
+rastreabilidade completa (conta, descrição, versão, ordem de exercício, base
+contábil e `arquivo:linha`). Os números são inventados e o comando avisa isso
+na primeira linha. O banco vai para `data/demo.duckdb`, separado do de
+produção.
 
 ---
 

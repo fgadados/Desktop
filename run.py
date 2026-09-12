@@ -5,6 +5,7 @@
     python run.py transformar        # aplica as 6 regras e carrega o DuckDB
     python run.py tudo               # extrair + transformar
     python run.py diagnostico        # so imprime o estado, sem escrever nada
+    python run.py demo               # roda tudo com dados SINTETICOS, sem rede
 
 Cada etapa e separada de proposito: a extracao depende de rede e e a unica
 parte nao reproduzivel offline. `transformar` roda inteiramente a partir dos
@@ -281,6 +282,103 @@ def diagnostico(args) -> int:
     return 0
 
 
+# ---------------------------------------------------------------------------
+# Demonstracao sem rede
+# ---------------------------------------------------------------------------
+def demo(args) -> int:
+    """Roda o pipeline inteiro com dados sinteticos e imprime a saida.
+
+    Existe para responder "o que este sistema mostra?" sem depender de rede e
+    sem esperar o download da CVM. Os numeros sao INVENTADOS -- servem para
+    exibir a forma do resultado e a cadeia de rastreabilidade, nada mais.
+    O banco vai para `data/demo.duckdb`, separado do banco de producao.
+    """
+    from etl.config import DATA
+    from tests import fixtures as fx
+
+    cnpj = "00000000000191"
+    anos = [2020, 2021, 2022, 2023]
+
+    linhas = []
+    for i, ano in enumerate(anos):
+        lucro = 80.0 + 14.0 * i
+        linhas += fx.cenario_balanco_completo(ano=ano, pl=400.0 + 40.0 * i)
+        linhas += fx.cenario_dre_anual(ano=ano, receita=1000.0 + 120.0 * i,
+                                       lucro=lucro, ebit=120.0 + 18.0 * i)
+        linhas += fx.cenario_dfc_anual(ano=ano, fco=150.0 + 12.0 * i,
+                                       fci=-60.0 - 5.0 * i, da=45.0 + 3.0 * i)
+        linhas += fx.cenario_itr_trimestres(
+            ano=ano, isolados=(lucro * 0.20, lucro * 0.25, lucro * 0.28))
+    brutos = fx.quadro(linhas)
+    brutos["CNPJ_CIA"] = cnpj
+
+    print("AVISO: dados SINTETICOS. Nao sao da CVM. Servem so para mostrar a "
+          "forma da saida.\n")
+    resultado = pipeline.normalizar_fatos(brutos)
+    fatos = resultado["fatos"]
+    print(f"brutos no layout da CVM : {len(brutos)} linhas")
+    print(f"apos as 6 regras        : {len(fatos)} fatos")
+
+    caminho = DATA / "demo.duckdb"
+    caminho.unlink(missing_ok=True)
+    con = load.conectar(caminho)
+    load.substituir(con, "fato_contabil", pipeline.para_db(fatos))
+    load.substituir(con, "teste_identidade", resultado["identidades"])
+    _carregar_indicadores(con, fatos, {cnpj: "INDUSTRIAL"})
+
+    sep = "=" * 92
+    print(f"\n{sep}\nIndicadores do exercicio 2023\n{sep}")
+    print(con.execute(
+        "SELECT indicador, round(valor, 6) AS valor, status, formula "
+        "FROM indicador WHERE periodo = '2023' ORDER BY indicador"
+    ).fetchdf().to_string(index=False))
+
+    print(f"\n{sep}\nRastreabilidade: de onde saiu o ROE de 2023\n{sep}")
+    print(con.execute(
+        "SELECT rotulo, cd_conta, ds_conta, valor, demonstrativo, base, versao, "
+        "ordem_exerc, dt_refer, referencia FROM indicador_entrada "
+        "WHERE periodo = '2023' AND indicador = 'roe' ORDER BY ordem"
+    ).fetchdf().to_string(index=False))
+
+    print(f"\n{sep}\nDuPont ano a ano\n{sep}")
+    print(con.execute(
+        "SELECT periodo, "
+        "max(CASE WHEN indicador='margem_liquida' THEN round(valor,4) END) AS margem_liq, "
+        "max(CASE WHEN indicador='giro_ativo'     THEN round(valor,4) END) AS giro, "
+        "max(CASE WHEN indicador='alavancagem'    THEN round(valor,4) END) AS alavancagem, "
+        "max(CASE WHEN indicador='roe'            THEN round(valor,4) END) AS roe, "
+        "max(CASE WHEN indicador='roe_dupont'     THEN round(valor,4) END) AS roe_dupont "
+        "FROM indicador WHERE length(periodo) = 4 GROUP BY periodo ORDER BY periodo"
+    ).fetchdf().to_string(index=False))
+
+    print(f"\n{sep}\nRegra 5: Q4 derivado, com a linhagem dos dois insumos\n{sep}")
+    for _, r in con.execute(
+        "SELECT periodo, cd_conta, valor, src_derivacao FROM fato_contabil "
+        "WHERE origem_periodo = 'DERIVADO_Q4' ORDER BY periodo"
+    ).fetchdf().iterrows():
+        print(f"  {r['periodo']}  conta {r['cd_conta']}  valor = {r['valor']:,.2f}")
+        print(f"    {r['src_derivacao']}")
+
+    print(f"\n{sep}\nIdentidade contabil\n{sep}")
+    print(con.execute(
+        "SELECT periodo, ativo_total, passivo_total, patrimonio_liquido, "
+        "residuo_principal, residuo_decomposto, tolerancia, status, src_ativo "
+        "FROM teste_identidade ORDER BY periodo"
+    ).fetchdf().to_string(index=False))
+
+    print(f"\n{sep}\nO que o sistema se recusa a calcular (trimestre sem DRE)\n{sep}")
+    print(con.execute(
+        "SELECT indicador, status, substr(motivo, 1, 70) AS motivo FROM indicador "
+        "WHERE status <> 'OK' AND periodo = '2023T1' ORDER BY indicador"
+    ).fetchdf().to_string(index=False))
+
+    con.close()
+    print(f"\nBanco de demonstracao: {caminho}")
+    print("Para abrir a interface sobre ele:  B3DSS_DATA=data streamlit run app/main.py")
+    print("(a interface le data/b3dss.duckdb; renomeie o demo se quiser visualizar)")
+    return 0
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -288,6 +386,7 @@ def main() -> int:
     sub.add_parser("extrair").set_defaults(fn=extrair)
     sub.add_parser("transformar").set_defaults(fn=transformar)
     sub.add_parser("diagnostico").set_defaults(fn=diagnostico)
+    sub.add_parser("demo").set_defaults(fn=demo)
     tudo = sub.add_parser("tudo")
     tudo.set_defaults(fn=lambda a: extrair(a) or transformar(a))
     args = p.parse_args()

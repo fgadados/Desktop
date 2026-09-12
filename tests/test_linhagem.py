@@ -56,6 +56,12 @@ def test_cada_indicador_carrega_formula_contas_e_linha_de_origem():
                 assert e.cd_conta and e.ds_conta
                 assert e.src_file and e.src_line
                 assert ":" in e.referencia
+                # As tres colunas que respondem "qual documento gerou este
+                # numero": versao (regra 2), ordem de exercicio (regra 3) e
+                # base contabil (regra 4). Nenhuma pode chegar nula na tela.
+                assert e.versao and e.ordem_exerc and e.base
+                assert e.ordem_exerc.upper().startswith(("ÚLTIMO", "ULTIMO",
+                                                         "PENÚLTIMO", "PENULTIMO"))
             linha = ind.para_linha()
             assert linha["contas_origem"]
 
