@@ -666,13 +666,8 @@ def contas(args) -> int:
         print(f"{DUCKDB_PATH} nao existe. Rode a transformacao antes.", file=sys.stderr)
         return 1
 
-    alvo = args.empresa.upper().strip()
+    cnpj = _resolver_cnpj(args.empresa)
     con = duckdb.connect(str(DUCKDB_PATH), read_only=True)
-
-    cnpj = con.execute(
-        "SELECT cnpj FROM depara_ticker WHERE ticker = ?", [alvo]
-    ).fetchone()
-    cnpj = cnpj[0] if cnpj else re.sub(r"\D", "", alvo)
 
     cab = con.execute(
         "SELECT denom_social, setor_ativ, plano_contas, origem_classificacao "
@@ -830,6 +825,58 @@ def identidade(args) -> int:
     return 0
 
 
+def _resolver_cnpj(alvo: str) -> str:
+    """Ticker ou CNPJ -> CNPJ de 14 digitos. String vazia quando nao resolve.
+
+    A ordem importa e ja custou uma rodada: quase todo ticker da B3 termina em
+    digito, entao "extrair os digitos de ITUB4" devolve "4" -- nao-vazio, e
+    portanto um CNPJ aparentemente valido para quem so testa `if cnpj`. O
+    ticker e consultado PRIMEIRO; so entra no caminho de digitos o que tiver
+    os 14 de um CNPJ.
+    """
+    import duckdb
+
+    from etl.config import DUCKDB_PATH
+
+    alvo = alvo.upper().strip()
+    if Path(DUCKDB_PATH).exists():
+        con = duckdb.connect(str(DUCKDB_PATH), read_only=True)
+        try:
+            achado = con.execute(
+                "SELECT cnpj FROM depara_ticker WHERE ticker = ?", [alvo]
+            ).fetchone()
+        finally:
+            con.close()
+        if achado:
+            return achado[0]
+
+    digitos = re.sub(r"\D", "", alvo)
+    return digitos if len(digitos) == 14 else ""
+
+
+def _listar_empresas(destino=sys.stderr) -> None:
+    """Diz quais empresas existem, em vez de so recusar o que foi pedido."""
+    import duckdb
+
+    from etl.config import DUCKDB_PATH
+
+    if not Path(DUCKDB_PATH).exists():
+        return
+    con = duckdb.connect(str(DUCKDB_PATH), read_only=True)
+    try:
+        linhas = con.execute(
+            "SELECT e.cnpj, e.denom_social, string_agg(d.ticker, '/') "
+            "FROM empresa e LEFT JOIN depara_ticker d ON d.cnpj = e.cnpj "
+            "GROUP BY 1, 2 ORDER BY 2"
+        ).fetchall()
+    finally:
+        con.close()
+    if linhas:
+        print("Empresas carregadas:", file=destino)
+        for cnpj, nome, tickers in linhas:
+            print(f"  {tickers or '-':10s} {cnpj}  {nome}", file=destino)
+
+
 def bruto(args) -> int:
     """O que os Parquet CRUS tem para uma empresa, antes de qualquer regra.
 
@@ -852,24 +899,12 @@ def bruto(args) -> int:
         return 1
     brutos = pd.concat([d for d in (dfp, itr) if d is not None], ignore_index=True)
 
-    alvo = args.empresa.upper().strip()
-    cnpj = re.sub(r"\D", "", alvo)
-    if not cnpj:
-        from etl.config import DUCKDB_PATH
-
-        if Path(DUCKDB_PATH).exists():
-            import duckdb
-
-            con = duckdb.connect(str(DUCKDB_PATH), read_only=True)
-            achado = con.execute(
-                "SELECT cnpj FROM depara_ticker WHERE ticker = ?", [alvo]
-            ).fetchone()
-            con.close()
-            cnpj = achado[0] if achado else ""
+    cnpj = _resolver_cnpj(args.empresa)
     if not cnpj:
         print(f"nao consegui resolver '{args.empresa}' para um CNPJ. "
-              "Passe o CNPJ, ou rode a transformacao para ter o de-para.",
-              file=sys.stderr)
+              "Passe o CNPJ com os 14 digitos, ou rode a transformacao para "
+              "ter o de-para de ticker.", file=sys.stderr)
+        _listar_empresas()
         return 1
 
     brutos["_cnpj"] = depara.normalizar_cnpj(brutos["CNPJ_CIA"])
