@@ -250,6 +250,10 @@ CREATE TABLE IF NOT EXISTS reapresentacao (
     cnpj             VARCHAR NOT NULL,
     base             VARCHAR NOT NULL,
     demonstrativo    VARCHAR NOT NULL,
+    -- Mesma dimensao extra da DMPL descrita em `fato_contabil`: a chave de
+    -- reapresentacao a inclui, entao a tabela precisa dela. Sem esta coluna,
+    -- uma reapresentacao de DMPL nao tem como dizer QUAL coluna do PL mudou.
+    coluna_df        VARCHAR NOT NULL DEFAULT '',
     cd_conta         VARCHAR NOT NULL,
     periodo          VARCHAR NOT NULL,
     ds_conta         VARCHAR,

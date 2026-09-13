@@ -249,8 +249,11 @@ def transformar(args) -> int:
 def _para_reapresentacao(rea: pd.DataFrame) -> pd.DataFrame:
     if rea.empty:
         return pd.DataFrame(columns=["cnpj", "base", "demonstrativo", "cd_conta", "periodo"])
+    # `COLUNA_DF` entra aqui porque `restatement.chave_fato` a inclui quando a
+    # DMPL esta presente. Ela precisa do nome do schema, senao a carga recusa a
+    # tabela inteira -- que foi exatamente o que aconteceu com dado real.
     return rea.rename(columns={"CNPJ_CIA": "cnpj", "CD_CONTA": "cd_conta",
-                               "DS_CONTA": "ds_conta"})
+                               "DS_CONTA": "ds_conta", "COLUNA_DF": "coluna_df"})
 
 
 def _para_divergencias(div: dict[str, pd.DataFrame]) -> pd.DataFrame:

@@ -212,6 +212,19 @@ def somente_isolados(df: pd.DataFrame) -> pd.DataFrame:
     )
 
 
+def com_dimensoes_extras(df: pd.DataFrame, colunas: list[str]) -> list[str]:
+    """Acrescenta `COLUNA_DF` a uma chave de fato quando a dimensao existir.
+
+    Toda chave de fato deste modulo passa por aqui, de proposito. Escrever a
+    lista a mao foi o que colapsou a DMPL em silencio: a mesma conta em duas
+    colunas do patrimonio liquido vira uma linha so e a outra desaparece --
+    sem erro, sem aviso, so um numero a menos na tela.
+    """
+    if "COLUNA_DF" in df.columns and "COLUNA_DF" not in colunas:
+        return list(colunas) + ["COLUNA_DF"]
+    return list(colunas)
+
+
 def _chave_conta(df: pd.DataFrame) -> list[str]:
     """Granularidade de um fato contabil dentro de um exercicio.
 
@@ -219,10 +232,9 @@ def _chave_conta(df: pd.DataFrame) -> list[str]:
     patrimonio liquido; sem ela a chave nao e unica e a derivacao do Q4 tenta
     um casamento N-para-N.
     """
-    base = ["CNPJ_CIA", "base", "demonstrativo", "CD_CONTA", "ano_exercicio"]
-    if "COLUNA_DF" in df.columns:
-        base.insert(-1, "COLUNA_DF")
-    return base
+    return com_dimensoes_extras(
+        df, ["CNPJ_CIA", "base", "demonstrativo", "CD_CONTA", "ano_exercicio"]
+    )
 
 
 class ChaveDuplicadaError(ValueError):
@@ -410,8 +422,11 @@ def normalizar(df: pd.DataFrame) -> pd.DataFrame:
             anuais["periodo"] = anuais["ano_exercicio"].astype("Int64").astype(str)
             todos = pd.concat([todos, anuais], ignore_index=True)
             todos = todos.drop_duplicates(
-                subset=["CNPJ_CIA", "base", "demonstrativo", "CD_CONTA", "periodo",
-                        "ordem_exerc_norm", "DT_REFER"],
+                subset=com_dimensoes_extras(
+                    todos,
+                    ["CNPJ_CIA", "base", "demonstrativo", "CD_CONTA", "periodo",
+                     "ordem_exerc_norm", "DT_REFER"],
+                ),
                 keep="first",
             )
 
