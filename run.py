@@ -748,14 +748,28 @@ def identidade(args) -> int:
     ).fetchall()
     print("  ".join(f"{s}: {n}" for s, n in resumo) or "tabela vazia")
 
+    por_montagem = con.execute(
+        "SELECT coalesce(montagem, '(sem data)'), count(*) FROM teste_identidade "
+        "WHERE status = 'FALHA' GROUP BY 1 ORDER BY 2 DESC"
+    ).fetchall()
+    if por_montagem:
+        print("falhas por montagem do balanco:  "
+              + "  ".join(f"{m}: {n}" for m, n in por_montagem))
+        print("  MISTA    = contas de publicacoes com datas diferentes; a "
+              "reapresentacao explica o residuo")
+        print("  COERENTE = todas do mesmo documento; a reapresentacao NAO "
+              "explica -- e aqui que vale olhar")
+
     falhas = con.execute(
         "SELECT t.cnpj, e.denom_social, e.plano_contas, t.base, t.periodo, "
         "       t.ativo_total, t.passivo_total, t.patrimonio_liquido, "
         "       t.residuo_principal, t.residuo_decomposto, t.tolerancia, "
-        "       t.src_ativo, t.src_passivo "
+        "       t.montagem, t.documentos, t.src_ativo, t.src_passivo "
         "FROM teste_identidade t LEFT JOIN empresa e ON e.cnpj = t.cnpj "
         "WHERE t.status = 'FALHA' "
-        "ORDER BY abs(t.residuo_principal) / nullif(abs(t.ativo_total), 0) DESC "
+        # COERENTE primeiro: sao as que ninguem explicou ainda.
+        "ORDER BY t.montagem = 'MISTA', "
+        "         abs(t.residuo_principal) / nullif(abs(t.ativo_total), 0) DESC "
         "NULLS LAST"
     ).fetchdf()
     con.close()
@@ -764,7 +778,8 @@ def identidade(args) -> int:
         print("\nNenhuma falha de identidade.")
         return 0
 
-    print(f"\n{len(falhas)} falha(s), da maior para a menor em termos relativos:\n")
+    print(f"\n{len(falhas)} falha(s). Primeiro as de montagem COERENTE, que "
+          "nao tem explicacao conhecida:\n")
     for _, r in falhas.iterrows():
         # O residuo relativo e opcional; o ABSOLUTO nunca some da tela. Ligar
         # o `if` a linha inteira esconderia o numero justamente quando o ativo
@@ -773,12 +788,13 @@ def identidade(args) -> int:
         if r["ativo_total"]:
             relativo = f"   ({abs(r['residuo_principal']) / abs(r['ativo_total']):.2%} do ativo)"
         print(f"{r['denom_social'] or r['cnpj']}  [{r['plano_contas']}]  "
-              f"{r['base']} {r['periodo']}")
+              f"{r['base']} {r['periodo']}   montagem: {r['montagem'] or '-'}")
         print(f"    ativo 1          : {r['ativo_total']:>22,.2f}")
         print(f"    passivo 2        : {r['passivo_total']:>22,.2f}")
         print(f"    residuo 1-2      : {r['residuo_principal']:>22,.2f}{relativo}")
         print(f"    residuo 2-(PC+PNC+PL): {r['residuo_decomposto']:>18,.2f}")
         print(f"    tolerancia       : {r['tolerancia']:>22,.2f}")
+        print(f"    documentos       : {r['documentos'] or '-'}")
         print(f"    origem           : {r['src_ativo']} | {r['src_passivo']}\n")
 
     print("Cole esta saida na conversa. Residuo relativo alto aponta leitura "

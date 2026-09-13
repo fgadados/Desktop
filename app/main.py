@@ -391,7 +391,24 @@ def _qualidade(cnpj: str, ticker: str) -> None:
         c = st.columns(3)
         for col, k in zip(c, ("OK", "FALHA", "FALTANDO")):
             col.metric(k, int(cont.get(k, 0)))
-        st.dataframe(ident, width="stretch", hide_index=True)
+
+        # Separar as falhas EXPLICADAS das inexplicadas. A politica de
+        # reapresentacao resolve conta a conta, entao um balanco pode ser
+        # montado de publicacoes de datas diferentes e nao fechar por
+        # construcao. Misturar os dois casos na mesma contagem esconde as que
+        # realmente pedem investigacao.
+        falhas = ident[ident["status"] == "FALHA"]
+        if not falhas.empty and "montagem" in falhas:
+            mistas = int((falhas["montagem"] == "MISTA").sum())
+            sozinhas = len(falhas) - mistas
+            st.caption(
+                f"Das {len(falhas)} falha(s): **{mistas}** com balanco montado "
+                f"de publicacoes de datas diferentes (a reapresentacao explica "
+                f"o residuo, ver a coluna `documentos`) e **{sozinhas}** com "
+                "todas as contas do mesmo documento -- estas nao tem "
+                "explicacao conhecida."
+            )
+        st.dataframe(_limpar_nulos(ident), width="stretch", hide_index=True)
 
     st.subheader("Reapresentacao de exercicio anterior")
     st.caption(

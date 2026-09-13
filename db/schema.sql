@@ -241,6 +241,12 @@ CREATE TABLE IF NOT EXISTS teste_identidade (
     tolerancia              DOUBLE,
     status                  VARCHAR NOT NULL,
     motivo                  VARCHAR,
+    -- COERENTE: as cinco contas vieram da mesma publicacao.
+    -- MISTA: vieram de publicacoes com datas diferentes, porque a politica de
+    -- reapresentacao resolve conta a conta. Um residuo com montagem MISTA tem
+    -- explicacao; com montagem COERENTE, nao tem. Ver transform/validations.py.
+    montagem                VARCHAR,
+    documentos              VARCHAR,   -- "ativo@2023-12-31 pl@2024-12-31"
     src_ativo               VARCHAR,
     src_passivo             VARCHAR,
     PRIMARY KEY (cnpj, base, periodo)
