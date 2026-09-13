@@ -27,12 +27,23 @@
 
 deteccao:
   # Aplicado sobre CAD_CIA.SETOR_ATIV, sem acento e em caixa alta. A primeira
-  # regra que casar vence. Sem casamento -> plano INDEFINIDO (nunca industrial
-  # por omissao).
+  # regra que casar vence.
+  #
+  # A ultima regra e `.*`: quem nao casa com nada vira INDUSTRIAL, que e o
+  # plano padronizado da CVM para companhia nao-financeira. A tela mostra o
+  # criterio literal ("casou com /.*/"), entao da para distinguir um setor
+  # reconhecido de um que so caiu no padrao.
+  #
+  # Os radicais abaixo sao STEMS de proposito, nao palavras inteiras. O
+  # SETOR_ATIV da CVM mistura singular, plural e a forma de holding:
+  # "Emp. Adm. Part. - Seguradoras e Corretoras" nao contem "SEGURO", e com
+  # o padrao antigo BBSE3 (BB Seguridade) era classificada como INDUSTRIAL.
+  # O sintoma nao era erro: era indicador FALTANDO em cascata, porque o plano
+  # industrial procurava emprestimo na conta 2.01.04 e achava "Capitalizacao".
   - plano: FINANCEIRO
     padrao: "BANCO|INTERMEDIACAO FINANCEIRA|CREDITO|ARRENDAMENTO MERCANTIL|SECURITIZA"
   - plano: SEGURADORA
-    padrao: "SEGURO|RESSEGURO|PREVIDENCIA|CAPITALIZACAO"
+    padrao: "SEGURADOR|SEGURO|SEGURIDADE|RESSEGUR|PREVIDENCIA|CAPITALIZACAO"
   - plano: ENERGIA
     padrao: "ENERGIA ELETRICA|GERACAO|TRANSMISSAO|DISTRIBUICAO DE ENERGIA"
   - plano: INDUSTRIAL

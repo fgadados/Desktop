@@ -7,6 +7,7 @@
     python run.py diagnostico        # so imprime o estado, sem escrever nada
     python run.py demo               # roda tudo com dados SINTETICOS, sem rede
     python run.py pagina             # gera empresas.html + empresas.csv
+    python run.py contas BBSE3       # plano de contas REAL de uma empresa
 
 Cada etapa e separada de proposito: a extracao depende de rede e e a unica
 parte nao reproduzivel offline. `transformar` roda inteiramente a partir dos
@@ -641,11 +642,92 @@ def schema(args) -> int:
     return 0
 
 
+def contas(args) -> int:
+    """Imprime o plano de contas REAL de uma empresa, do banco ja carregado.
+
+    Mesma funcao que `schema` cumpre para as colunas: parar de declarar de
+    memoria. O bloco SEGURADORA de config/sector_plans.yml avisa, no proprio
+    arquivo, que seus codigos nunca foram confrontados com demonstracao de
+    seguradora de verdade. Esta saida e o que permite confronta-los.
+    """
+    import duckdb
+
+    from etl.config import DUCKDB_PATH
+
+    if not Path(DUCKDB_PATH).exists():
+        print(f"{DUCKDB_PATH} nao existe. Rode a transformacao antes.", file=sys.stderr)
+        return 1
+
+    alvo = args.empresa.upper().strip()
+    con = duckdb.connect(str(DUCKDB_PATH), read_only=True)
+
+    cnpj = con.execute(
+        "SELECT cnpj FROM depara_ticker WHERE ticker = ?", [alvo]
+    ).fetchone()
+    cnpj = cnpj[0] if cnpj else re.sub(r"\D", "", alvo)
+
+    cab = con.execute(
+        "SELECT denom_social, setor_ativ, plano_contas, origem_classificacao "
+        "FROM empresa WHERE cnpj = ?", [cnpj]
+    ).fetchone()
+    if cab is None:
+        print(f"'{args.empresa}' nao esta no banco. Empresas carregadas:",
+              file=sys.stderr)
+        for r in con.execute(
+            "SELECT e.cnpj, e.denom_social, string_agg(d.ticker, '/') "
+            "FROM empresa e LEFT JOIN depara_ticker d ON d.cnpj = e.cnpj "
+            "GROUP BY 1, 2 ORDER BY 2"
+        ).fetchall():
+            print(f"  {r[2] or '-':10s} {r[0]}  {r[1]}", file=sys.stderr)
+        return 1
+
+    print(f"{cab[0]}  ({cnpj})")
+    print(f"SETOR_ATIV : {cab[1]}")
+    print(f"plano      : {cab[2]}   [{cab[3]}]\n")
+
+    periodo = con.execute(
+        "SELECT periodo FROM fato_contabil WHERE cnpj = ? "
+        "ORDER BY dt_fim_exerc DESC NULLS LAST LIMIT 1", [cnpj]
+    ).fetchone()
+    if periodo is None:
+        print("empresa sem fato contabil carregado.", file=sys.stderr)
+        return 1
+    periodo = periodo[0]
+    print(f"Contas presentes no periodo mais recente ({periodo}):\n")
+
+    linhas = con.execute(
+        "SELECT demonstrativo, cd_conta, coluna_df, ds_conta, valor, "
+        "       src_file, src_line "
+        "FROM fato_contabil WHERE cnpj = ? AND periodo = ? "
+        "ORDER BY demonstrativo, cd_conta, coluna_df", [cnpj, periodo]
+    ).fetchall()
+    con.close()
+
+    atual = None
+    for dem, cd, coluna, ds, valor, arq, linha in linhas:
+        if dem != atual:
+            print(f"\n--- {dem} " + "-" * (72 - len(dem)))
+            atual = dem
+        v = "" if valor is None else f"{valor:>18,.2f}".replace(",", "_").replace(
+            ".", ",").replace("_", ".")
+        # Sem a coluna do PL, duas linhas da DMPL saem identicas na tela --
+        # mesmo codigo, mesma descricao, valores diferentes e nada explicando.
+        rotulo = f"{ds or ''} [{coluna}]" if coluna else (ds or "")
+        print(f"  {cd:<14s} {rotulo[:44]:<44s} {v}   {arq}:{linha}")
+
+    print(f"\n{len(linhas)} contas. Cole esta saida na conversa para que o plano "
+          "do setor seja declarado a partir do arquivo real, sem suposicao.")
+    return 0
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="comando", required=True)
     sub.add_parser("schema").set_defaults(fn=schema)
+    ct = sub.add_parser("contas")
+    ct.add_argument("empresa", help="ticker (BBSE3) ou CNPJ")
+    ct.set_defaults(fn=contas)
     pag = sub.add_parser("pagina")
     pag.add_argument("--banco", help="caminho do .duckdb (padrao: data/b3dss.duckdb)")
     pag.add_argument("--saida", help="arquivo HTML de saida (padrao: empresas.html)")

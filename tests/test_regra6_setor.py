@@ -35,6 +35,39 @@ def test_seguradora_cai_no_plano_de_seguradora():
     assert cls.loc[0, "plano"] == "SEGURADORA"
 
 
+# `SETOR_ATIV` como a CVM escreve, copiado da tela do sistema rodando sobre o
+# `cad_cia_aberta.csv` real em 13/09/2026. O valor de BBSE3 é o que expôs o
+# defeito: o padrão antigo era "SEGURO", e "SEGURADORAS" não contém "SEGURO"
+# --- S-E-G-U-R-A-D-O-R-A-S contra S-E-G-U-R-O. A empresa caía no coringa
+# `.*` e virava INDUSTRIAL, e o sintoma não era erro: era indicador FALTANDO
+# em cascata, porque o plano industrial procurava empréstimo na conta 2.01.04
+# e achava "Capitalização".
+#
+# O teste anterior usava "Seguros e Previdência", string que eu inventei e que
+# casava com o padrão antigo. Por isso ele passava enquanto o dado real não.
+@pytest.mark.parametrize("setor_ativ,plano", [
+    ("Emp. Adm. Part. - Seguradoras e Corretoras", "SEGURADORA"),  # BBSE3, confirmado
+    ("Seguradoras", "SEGURADORA"),
+    ("Seguros", "SEGURADORA"),
+    ("Resseguradoras", "SEGURADORA"),
+    ("Previdência e Seguros", "SEGURADORA"),
+    ("Capitalização", "SEGURADORA"),
+])
+def test_variantes_de_seguradora_do_setor_ativ(setor_ativ, plano):
+    cls = sector.classificar(fx.cadastro(fx.CNPJ_A, setor_ativ))
+    assert cls.loc[0, "plano"] == plano, (
+        f"'{setor_ativ}' caiu em {cls.loc[0, 'plano']}: "
+        f"{cls.loc[0, 'origem_classificacao']}"
+    )
+
+
+def test_seguranca_nao_e_seguradora():
+    """O radical foi encurtado para pegar SEGURADORAS; não pode pegar demais.
+    'Segurança' vira 'SEGURANCA' sem acento e não contém SEGURO nem SEGURADOR."""
+    cls = sector.classificar(fx.cadastro(fx.CNPJ_A, "Serviços de Segurança"))
+    assert cls.loc[0, "plano"] != "SEGURADORA"
+
+
 def test_setor_desconhecido_nao_vira_industrial_por_omissao():
     """A regra e explicita: sem classificacao, nada de plano industrial calado."""
     cad = fx.cadastro(fx.CNPJ_A, "")
