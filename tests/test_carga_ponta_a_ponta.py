@@ -168,17 +168,28 @@ def banco(tmp_path_factory):
     _sgs().to_parquet(pq / "bcb" / "sgs.parquet")
 
     env = {**os.environ, "B3DSS_DATA": str(dados), "PYTHONUNBUFFERED": "1"}
-    proc = subprocess.run(
-        [sys.executable, "run.py", "transformar"],
-        cwd=RAIZ, env=env, capture_output=True, text=True, timeout=600,
-    )
-    assert proc.returncode == 0, (
-        "`run.py transformar` falhou -- e e exatamente o comando que roda no Mac.\n"
-        f"--- stdout ---\n{proc.stdout}\n--- stderr ---\n{proc.stderr}"
-    )
+
+    def rodar(rotulo: str) -> str:
+        proc = subprocess.run(
+            [sys.executable, "run.py", "transformar"],
+            cwd=RAIZ, env=env, capture_output=True, text=True, timeout=600,
+        )
+        assert proc.returncode == 0, (
+            f"`run.py transformar` falhou na {rotulo} -- e exatamente o comando "
+            f"que roda no Mac.\n--- stdout ---\n{proc.stdout}"
+            f"\n--- stderr ---\n{proc.stderr}"
+        )
+        return proc.stdout
+
+    # Duas execuções seguidas no MESMO diretório. A segunda é a que vale: ela
+    # encontra um banco já criado, que é a situação em que `CREATE TABLE IF NOT
+    # EXISTS` deixa de proteger e a carga passa a falhar por uma coluna que
+    # existe no `.sql`. Testar só com banco novo esconde essa classe inteira.
+    primeira = rodar("primeira execucao")
+    segunda = rodar("segunda execucao, sobre banco ja existente")
 
     con = duckdb.connect(str(dados / "b3dss.duckdb"), read_only=True)
-    yield con, proc.stdout
+    yield con, primeira, segunda
     con.close()
 
 
@@ -207,7 +218,7 @@ TABELAS_OBRIGATORIAS = [
 
 @pytest.mark.parametrize("tabela", TABELAS_OBRIGATORIAS)
 def test_tabela_carregada(banco, tabela):
-    con, _ = banco
+    con, *_ = banco
     assert _n(con, tabela) > 0, (
         f"'{tabela}' ficou vazia. Ou o cenario deixou de exercitar esse caminho, "
         "ou a carga silenciou -- os dois casos precisam de correcao, nao de "
@@ -218,7 +229,7 @@ def test_tabela_carregada(banco, tabela):
 def test_reapresentacao_preserva_a_coluna_da_dmpl(banco):
     """A regressão concreta: `COLUNA_DF` não existia no schema e a carga
     recusava a tabela inteira com KeyError."""
-    con, _ = banco
+    con, *_ = banco
     dmpl = con.execute(
         "SELECT coluna_df, valor_as_filed, valor_restated FROM reapresentacao "
         "WHERE demonstrativo = 'DMPL' ORDER BY coluna_df"
@@ -236,7 +247,7 @@ def test_reapresentacao_preserva_a_coluna_da_dmpl(banco):
 
 def test_reapresentacao_do_balanco_tambem_entra(banco):
     """PL 380 -> 372: a divergência fica visível, não é escolhida em silêncio."""
-    con, _ = banco
+    con, *_ = banco
     linha = con.execute(
         "SELECT valor_as_filed, valor_restated, n_publicacoes FROM reapresentacao "
         "WHERE cd_conta = '2.03' AND periodo = '2022'"
@@ -251,16 +262,24 @@ def test_nenhuma_coluna_do_transform_fica_fora_do_schema(banco):
     """`db.load.substituir` levanta KeyError quando a camada transform ganha
     coluna que o schema não tem. Este teste é o que faz esse erro aparecer
     aqui, e não depois de meia hora de download na máquina do usuário."""
-    _, saida = banco
-    assert "nao previstas no schema" not in saida
-    assert "[5/6] ok carga" in saida, (
-        "a etapa de carga precisa ter concluido; saida:\n" + saida
-    )
+    _, primeira, segunda = banco
+    for rotulo, saida in (("1a", primeira), ("2a", segunda)):
+        assert "nao previstas no schema" not in saida
+        assert "[5/6] ok carga" in saida, (
+            f"a carga precisa ter concluido na {rotulo} execucao; saida:\n{saida}"
+        )
+
+
+def test_segunda_execucao_nao_recria_o_banco(banco):
+    """Com o schema em dia, reconectar não pode apagar e refazer o arquivo.
+    A recriação existe para schema que mudou, não para toda rodada."""
+    _, _, segunda = banco
+    assert "schema mudou" not in segunda
 
 
 def test_q4_derivado_existe(banco):
     """Regra 5: o quarto trimestre não é publicado, é derivado por diferença."""
-    con, _ = banco
+    con, *_ = banco
     n = con.execute(
         "SELECT count(*) FROM fato_contabil WHERE origem_periodo = 'DERIVADO_Q4'"
     ).fetchone()[0]
@@ -268,7 +287,7 @@ def test_q4_derivado_existe(banco):
 
 
 def test_acoes_em_circulacao_desconta_tesouraria(banco):
-    con, _ = banco
+    con, *_ = banco
     linha = con.execute(
         "SELECT acoes_total, tesouraria_total, acoes_em_circulacao "
         "FROM acoes_em_circulacao"
@@ -279,7 +298,7 @@ def test_acoes_em_circulacao_desconta_tesouraria(banco):
 def test_preco_sem_evento_cadastrado_nao_finge_estar_ajustado(banco):
     """O cenário tem um salto de 50% sem evento em corporate_events.csv.
     A série não pode sair marcada como ajustada."""
-    con, _ = banco
+    con, *_ = banco
     status = con.execute(
         "SELECT status FROM cobertura_ajuste WHERE ticker = ?", [TICKER]
     ).fetchone()[0]

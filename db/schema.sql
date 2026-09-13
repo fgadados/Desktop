@@ -295,6 +295,18 @@ CREATE TABLE IF NOT EXISTS aviso (
 );
 
 -- ---------------------------------------------------------------------------
+-- Versao do proprio schema
+-- ---------------------------------------------------------------------------
+-- `CREATE TABLE IF NOT EXISTS` nao altera banco ja criado: acrescentar coluna
+-- aqui nao acrescenta coluna la, e a carga passa a falhar por uma coluna que,
+-- olhando este arquivo, existe. Esta tabela guarda o sha256 do arquivo; quando
+-- ele difere, `db.load.conectar` recria o banco. Ver o cabecalho de db/load.py.
+CREATE TABLE IF NOT EXISTS schema_versao (
+    impressao   VARCHAR NOT NULL,
+    aplicado_em TIMESTAMP NOT NULL
+);
+
+-- ---------------------------------------------------------------------------
 -- Execucao do pipeline
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS execucao (
