@@ -57,9 +57,10 @@ if [ -t 1 ]; then
 else
   VERDE=""; VERM=""; AMAR=""; FIM=""
 fi
-ok()   { echo "${VERDE}✓${FIM} $*"; }
-erro() { echo "${VERM}✗${FIM} $*" >&2; }
-info() { echo "${AMAR}→${FIM} $*"; }
+ok()    { echo "${VERDE}✓${FIM} $*"; }
+erro()  { echo "${VERM}✗${FIM} $*" >&2; }
+info()  { echo "${AMAR}→${FIM} $*"; }
+aviso() { echo "${AMAR}!${FIM} $*"; }
 
 # ---------------------------------------------------------------------------
 # 1. Python 3.11 ou mais novo
@@ -115,6 +116,33 @@ fi
 PYVER="$(versao_de "$PY")"
 ok "Python encontrado: $PY ($PYVER)"
 info "Codigo: commit $(git -C "$RAIZ" rev-parse --short HEAD 2>/dev/null || echo '?')"
+
+# Rodar codigo antigo ja custou rodadas inteiras: o usuario reporta um defeito
+# que foi corrigido ha commits, e a conversa gasta um turno descobrindo que a
+# correcao existe mas nao foi baixada. O carimbo do commit acima nao resolve
+# sozinho -- ele so ajuda DEPOIS que alguem desconfia.
+#
+# Esta checagem e melhor-esforco: sem rede, sem remoto ou repositorio ausente,
+# ela simplesmente nao diz nada. Ela nunca baixa nada por conta propria; quem
+# decide atualizar e o usuario.
+if command -v git >/dev/null 2>&1 && git -C "$RAIZ" rev-parse --git-dir >/dev/null 2>&1; then
+  _ramo="$(git -C "$RAIZ" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+  if [ -n "$_ramo" ] && [ "$_ramo" != "HEAD" ]; then
+    # 10s de teto: a conferencia nao pode virar o proximo "travou".
+    if timeout 10 git -C "$RAIZ" fetch --quiet origin "$_ramo" 2>/dev/null; then
+      _atras="$(git -C "$RAIZ" rev-list --count "HEAD..origin/$_ramo" 2>/dev/null || echo 0)"
+      if [ "${_atras:-0}" -gt 0 ] 2>/dev/null; then
+        echo
+        aviso "Ha $_atras commit(s) novo(s) que voce ainda nao baixou."
+        echo "  Voce vai rodar codigo antigo, e um defeito ja corrigido pode"
+        echo "  reaparecer. Para atualizar, interrompa (Ctrl+C) e rode:"
+        echo
+        echo "      cd $RAIZ && git pull && $0 $*"
+        echo
+      fi
+    fi
+  fi
+fi
 
 case "$PYVER" in
   3.11|3.12|3.13) ;;
@@ -291,6 +319,48 @@ esac
 echo
 ok "Abrindo a interface no navegador."
 echo "  Banco: $BANCO"
-echo "  Para parar: Ctrl+C nesta janela."
 echo
-B3DSS_DB="$RAIZ/$BANCO" exec .venv/bin/streamlit run app/main.py
+
+# O `streamlit run` nao volta: ele SERVE a pagina e segura a janela enquanto
+# roda. Isso ja foi reportado como travamento.
+#
+# A mensagem "Ctrl+C para parar" era impressa aqui, ANTES de subir o servidor,
+# e o banner do proprio Streamlit a empurrava para fora da tela. Quem olhava
+# depois via so a parede de texto e um cursor que nao responde.
+#
+# Por isso o servidor sobe em segundo plano e a explicacao e impressa DEPOIS
+# do banner dele, que e quando ela tem chance de ser a ultima coisa na tela.
+# O `wait` mantem o script em primeiro plano, entao Ctrl+C continua chegando
+# ao Streamlit exatamente como antes.
+B3DSS_DB="$RAIZ/$BANCO" .venv/bin/streamlit run app/main.py &
+_streamlit=$!
+
+_caixa() {
+  # Larguras batidas por printf, nao por espaco contado na mao.
+  local largura=60 linha
+  local borda; borda="$(printf '─%.0s' $(seq 1 $largura))"
+  echo
+  echo "${VERDE}┌${borda}┐${FIM}"
+  for linha in "$@"; do
+    printf "${VERDE}│${FIM}%-${largura}s${VERDE}│${FIM}\n" "$linha"
+  done
+  echo "${VERDE}└${borda}┘${FIM}"
+  echo
+}
+
+( sleep 4
+  # So anuncia o servidor se ele ainda estiver de pe. Se o Streamlit morreu
+  # nesses 4 segundos, imprimir "nao esta travada" seria mentir sobre um
+  # processo que nao existe mais, e esconder o erro dele.
+  kill -0 "$_streamlit" 2>/dev/null || exit 0
+  _caixa \
+    "  Esta janela agora E o servidor. Nao esta travada." \
+    "" \
+    "  Ver os dados  : http://localhost:8501 no navegador" \
+    "  Digitar outra : abra outra aba do Terminal (Cmd+T)" \
+    "  Encerrar      : Ctrl+C aqui" ) &
+
+# `set -e` esta ligado e Ctrl+C faz o `wait` sair com 130. Encerrar assim e o
+# jeito normal de fechar a interface, nao falha: o `|| true` evita que o
+# script termine com erro so por o usuario ter apertado Ctrl+C.
+wait "$_streamlit" || true
