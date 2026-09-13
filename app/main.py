@@ -229,7 +229,7 @@ def _multiplos(cnpj: str, ticker: str) -> None:
                 y=alt.Y("pct_10a:Q", title="percentil do proprio historico (10a)",
                         scale=alt.Scale(domain=[0, 1])),
             ).properties(height=220),
-            use_container_width=True,
+            width="stretch",
         )
         st.caption(
             "Leitura: 0,05 significa que o valor de hoje e menor que 95% das "
@@ -269,7 +269,7 @@ def _dupont(cnpj: str) -> None:
             y=alt.Y("valor:Q", title=""),
             color="componente:N",
         ).properties(height=260),
-        use_container_width=True,
+        width="stretch",
     )
     st.code("ROE = margem_liquida x giro_ativo x alavancagem", language="text")
     if "roe" in largo and "roe_dupont" in largo:
@@ -306,7 +306,7 @@ def _risco(ticker: str) -> None:
             x=alt.X("data:T", title=""),
             y=alt.Y("drawdown:Q", title="drawdown", axis=alt.Axis(format="%")),
         ).properties(height=220),
-        use_container_width=True,
+        width="stretch",
     )
 
     st.subheader("Correlacao da carteira")

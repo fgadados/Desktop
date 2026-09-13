@@ -118,7 +118,14 @@ def render(banco, tmp_path_factory) -> dict:
     )
     import json
 
-    return json.loads(proc.stdout.split(marca, 1)[1].splitlines()[0])
+    resultado = json.loads(proc.stdout.split(marca, 1)[1].splitlines()[0])
+    # O que o usuario le no terminal, verbatim. Verificar o TEXTO em vez de
+    # pendurar um handler no logger do Streamlit nao e atalho: e mais fiel.
+    # A primeira versao deste arquivo capturava `logging.getLogger("streamlit")`
+    # e nao pegava nada -- `import streamlit` reconfigura a hierarquia depois
+    # que o handler foi posto. O teste passava com a API depreciada presente.
+    resultado["terminal"] = proc.stderr + proc.stdout
+    return resultado
 
 
 def test_a_interface_sobe_sem_excecao(render):
@@ -139,6 +146,31 @@ def test_nenhuma_celula_escreve_a_palavra_None(render):
     """`None` na tela faz ausencia de motivo parecer um valor. Ja foi defeito."""
     suspeitas = [t for t in render["textos"] if t.strip() in {"None", "nan", "NaN"}]
     assert not suspeitas, suspeitas
+
+
+def test_a_interface_nao_usa_api_depreciada(render):
+    """Aviso repetido em cada `st.dataframe` inunda o terminal.
+
+    Com a interface aberta em 13/09/2026 o terminal virou uma parede de
+
+        `use_container_width` will be removed after 2025-12-31.
+        For `use_container_width=True`, use `width='stretch'`. ...
+
+    quatro linhas por chamada, a cada redesenho da tela. Nada ali quebrava um
+    numero, mas era o mesmo defeito de sempre por outro lado: mensagem que
+    importa deixa de ser vista porque esta afogada em mensagem que nao
+    importa. O log do usuario e o canal de diagnostico deste projeto -- ele ja
+    custou rodadas inteiras por ilegibilidade.
+    """
+    terminal = render["terminal"]
+    culpadas = [
+        linha for linha in terminal.splitlines()
+        if "will be removed after" in linha or "Please replace `" in linha
+    ]
+    assert not culpadas, (
+        "a interface usa API depreciada do Streamlit; isto sai no terminal do "
+        "usuario a cada redesenho da tela:\n" + "\n".join(sorted(set(culpadas))[:5])
+    )
 
 
 def test_nenhuma_expressao_solta_em_app():
