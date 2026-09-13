@@ -27,8 +27,8 @@
 #               (214 contas). Ver o comentario do proprio plano.
 #   INDUSTRIAL  parcial: BPA/BPP/DRE conferidos indiretamente, via as empresas
 #               industriais da carteira que fecham a identidade contabil.
-#   FINANCEIRO  NAO confrontado. Trate como hipotese ate rodar
-#               `python run.py contas ITUB4` e conferir conta a conta.
+#   FINANCEIRO  confrontado em 13/09/2026 contra ITUB4, ITR CON 2026T2
+#               (148 contas). Ver o comentario do proprio plano.
 #   ENERGIA     herda INDUSTRIAL.
 #
 # `python run.py contas TICKER` imprime o plano real de uma empresa, com
@@ -166,29 +166,59 @@ planos:
         codigos: ["1"]
         demonstrativo: BPA
         padrao_ds_conta: "ATIVO TOTAL"
+      caixa_equivalentes:
+        # 1.01 no banco. No plano industrial 1.01 e "Ativo Circulante" e o
+        # caixa e 1.01.01 -- banco nao tem a divisao circulante.
+        codigos: ["1.01"]
+        demonstrativo: BPA
+        padrao_ds_conta: "CAIXA E EQUIVALENTES"
+      ativos_financeiros:
+        codigos: ["1.02"]
+        demonstrativo: BPA
+        padrao_ds_conta: "ATIVOS FINANCEIROS"
+      operacoes_credito:
+        codigos: ["1.02.03.05"]
+        demonstrativo: BPA
+        padrao_ds_conta: "OPERACOES DE CREDITO"
       passivo_total:
         codigos: ["2"]
         demonstrativo: BPP
         padrao_ds_conta: "PASSIVO TOTAL"
       patrimonio_liquido:
-        codigos: ["2.03"]
+        # 2.08, nao 2.03. Num banco 2.03 e "Passivos Financeiros ao Custo
+        # Amortizado" -- no ITUB4 de 2026T2, R$ 2,4 TRILHOES de captacao.
+        # Ler isso como patrimonio liquido nao e numero faltando, e numero
+        # errado: o PL de verdade e R$ 228 bilhoes.
+        codigos: ["2.08"]
         demonstrativo: BPP
         padrao_ds_conta: "PATRIMONIO LIQUIDO"
+      depositos:
+        codigos: ["2.03.01"]
+        demonstrativo: BPP
+        padrao_ds_conta: "DEPOSITOS"
+      receita_intermediacao:
+        codigos: ["3.01"]
+        demonstrativo: DRE
+        padrao_ds_conta: "INTERMEDIACAO FINANCEIRA"
+      despesa_intermediacao:
+        codigos: ["3.02"]
+        demonstrativo: DRE
+        padrao_ds_conta: "INTERMEDIACAO FINANCEIRA"
       resultado_intermediacao:
         codigos: ["3.03"]
         demonstrativo: DRE
         padrao_ds_conta: "INTERMEDIACAO FINANCEIRA"
       lucro_liquido:
-        # 3.09 foi REMOVIDO da lista em 13/09/2026. No arquivo real da CVM ele
-        # e "Resultado Antes dos Tributos sobre o Lucro" -- que contem a
-        # palavra "Lucro" e portanto casava com o padrao abaixo. Bastava a
-        # companhia nao publicar 3.11 para o sistema entregar lucro ANTES de
-        # imposto como lucro liquido, calado. Na BBSE3 seriam R$ 470 milhoes
-        # a mais num trimestre, 16%.
+        # 3.09, e o codigo NAO significa a mesma coisa nos tres planos:
         #
-        # Resultado antes de imposto nao e aproximacao de lucro liquido: e
-        # outro numero. Sem 3.11, o certo e FALTANDO.
-        codigos: ["3.11"]
+        #   banco       3.09  Lucro/Prejuizo Consolidado do Periodo  <- este
+        #   seguradora  3.09  Resultado Antes dos Tributos sobre o Lucro
+        #   industrial  3.11  Lucro/Prejuizo Consolidado do Periodo
+        #
+        # Por isso 3.09 saiu da lista dos outros dois planos e entra aqui
+        # sozinho: e a regra 6 existindo por um motivo concreto. O
+        # `padrao_ds_conta` e a defesa se a CVM renumerar.
+        codigos: ["3.09"]
         demonstrativo: DRE
         padrao_ds_conta: "LUCRO|PREJUIZO"
       fco:

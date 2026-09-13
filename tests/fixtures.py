@@ -278,6 +278,59 @@ def cenario_itr_completo(cnpj: str = CNPJ_A, ano: int = 2023, receita: float = 1
     return linhas
 
 
+def cenario_banco(cnpj: str = CNPJ_BANCO, ano: int = 2023, pl: float = 200.0,
+                  lucro: float = 30.0):
+    """Balanco e DRE no plano de BANCO, que nao e o industrial renumerado.
+
+    Confrontado com ITUB4 (ITR CON 2026T2) em 13/09/2026. As diferencas que
+    importam, e que ate entao os testes deste projeto nao reproduziam:
+
+        nao ha circulante / nao-circulante no passivo;
+        o patrimonio liquido e 2.08, e 2.03 e captacao ao custo amortizado;
+        o resultado final da DRE e 3.09, nao 3.11.
+
+    Usar o cenario industrial com o plano FINANCEIRO -- o que este arquivo
+    fazia antes -- so "funcionava" enquanto o plano de banco apontava, errado,
+    para os codigos industriais.
+    """
+    fim = f"{ano}-12-31"
+    captacao = 700.0
+    outros = 100.0
+    total = captacao + outros + pl
+    return [
+        fato(cnpj=cnpj, dt_refer=fim, demonstrativo="BPA", cd_conta="1",
+             ds_conta="Ativo Total", vl=total, dt_fim=fim),
+        fato(cnpj=cnpj, dt_refer=fim, demonstrativo="BPA", cd_conta="1.01",
+             ds_conta="Caixa e Equivalentes de Caixa", vl=50.0, dt_fim=fim),
+        fato(cnpj=cnpj, dt_refer=fim, demonstrativo="BPA", cd_conta="1.02",
+             ds_conta="Ativos Financeiros", vl=total - 50.0, dt_fim=fim),
+        fato(cnpj=cnpj, dt_refer=fim, demonstrativo="BPP", cd_conta="2",
+             ds_conta="Passivo Total", vl=total, dt_fim=fim),
+        fato(cnpj=cnpj, dt_refer=fim, demonstrativo="BPP", cd_conta="2.03",
+             ds_conta="Passivos Financeiros ao Custo Amortizado", vl=captacao,
+             dt_fim=fim),
+        fato(cnpj=cnpj, dt_refer=fim, demonstrativo="BPP", cd_conta="2.06",
+             ds_conta="Outros Passivos", vl=outros, dt_fim=fim),
+        fato(cnpj=cnpj, dt_refer=fim, demonstrativo="BPP", cd_conta="2.08",
+             ds_conta="Patrimônio Líquido Consolidado", vl=pl, dt_fim=fim),
+        fato(cnpj=cnpj, dt_refer=fim, demonstrativo="DRE", cd_conta="3.01",
+             ds_conta="Receitas da Intermediação Financeira", vl=120.0,
+             dt_ini=f"{ano}-01-01", dt_fim=fim),
+        fato(cnpj=cnpj, dt_refer=fim, demonstrativo="DRE", cd_conta="3.02",
+             ds_conta="Despesas da Intermediação Financeira", vl=-70.0,
+             dt_ini=f"{ano}-01-01", dt_fim=fim),
+        fato(cnpj=cnpj, dt_refer=fim, demonstrativo="DRE", cd_conta="3.03",
+             ds_conta="Resultado Bruto Intermediação Financeira", vl=50.0,
+             dt_ini=f"{ano}-01-01", dt_fim=fim),
+        fato(cnpj=cnpj, dt_refer=fim, demonstrativo="DRE", cd_conta="3.05",
+             ds_conta="Resultado Antes dos Tributos sobre o Lucro", vl=lucro * 1.2,
+             dt_ini=f"{ano}-01-01", dt_fim=fim),
+        fato(cnpj=cnpj, dt_refer=fim, demonstrativo="DRE", cd_conta="3.09",
+             ds_conta="Lucro/Prejuízo Consolidado do Período", vl=lucro,
+             dt_ini=f"{ano}-01-01", dt_fim=fim),
+    ]
+
+
 def cadastro(cnpj: str = CNPJ_A, setor: str = "Emp. Adm. Part.") -> pd.DataFrame:
     return pd.DataFrame(
         [{"CNPJ_CIA": cnpj, "DENOM_SOCIAL": "COMPANHIA TESTE S.A.", "CD_CVM": "99999",

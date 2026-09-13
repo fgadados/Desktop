@@ -82,10 +82,10 @@ def test_ebitda_exige_da_identificavel_e_nao_estima():
 
 
 def test_banco_recebe_nao_se_aplica_em_vez_de_numero():
-    linhas = fx.cenario_balanco_completo(cnpj=fx.CNPJ_BANCO) + fx.cenario_dre_anual(
-        cnpj=fx.CNPJ_BANCO
-    )
-    fatos = pipeline.normalizar_fatos(fx.quadro(linhas))["fatos"]
+    # Cenario no plano de BANCO. Antes de 13/09/2026 este teste montava um
+    # balanco INDUSTRIAL e o classificava como banco; so passava porque o
+    # plano financeiro apontava, errado, para 2.03 e 3.11.
+    fatos = pipeline.normalizar_fatos(fx.quadro(fx.cenario_banco()))["fatos"]
     conceitos = ["receita_liquida", "lucro_liquido", "patrimonio_liquido", "ativo_total"]
     fund = indicators.montar_fundamentos(fatos, {fx.CNPJ_BANCO: "FINANCEIRO"}, conceitos)
     inds = {i.nome: i for i in indicators.dupont(fund, fx.CNPJ_BANCO, "2023")}

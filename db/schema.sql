@@ -247,6 +247,10 @@ CREATE TABLE IF NOT EXISTS teste_identidade (
     -- explicacao; com montagem COERENTE, nao tem. Ver transform/validations.py.
     montagem                VARCHAR,
     documentos              VARCHAR,   -- "ativo@2023-12-31 pl@2024-12-31"
+    -- Quais contas foram somadas na decomposicao. Nao e fixo: industrial e
+    -- seguradora somam 2.01+2.02+2.03, banco soma 2.01 ate 2.08. Registrar
+    -- quais entraram permite refazer a conta a mao a partir da tela.
+    passivo_partes          VARCHAR,
     src_ativo               VARCHAR,
     src_passivo             VARCHAR,
     PRIMARY KEY (cnpj, base, periodo)

@@ -76,9 +76,22 @@ def _conceito(planos: dict, plano: str, nome: str) -> dict:
 # ---------------------------------------------------------------------------
 # O risco de trocar lucro por resultado antes de imposto
 # ---------------------------------------------------------------------------
-@pytest.mark.parametrize("plano", ["INDUSTRIAL", "FINANCEIRO", "SEGURADORA"])
-def test_nenhum_plano_aceita_3_09_como_lucro_liquido(planos, plano):
-    """3.09 é resultado ANTES de imposto. Nunca é o lucro líquido."""
+# FINANCEIRO ficou de fora, e a correcao de um erro meu. Esta lista dizia
+# "nenhum plano", generalizando o arquivo da seguradora para todos os setores.
+# O BPP real do ITUB4, lido um dia depois, mostrou que num BANCO 3.09 e
+# "Lucro/Prejuizo Consolidado do Periodo" -- o resultado final, nao o
+# pre-imposto. O mesmo codigo, tres significados:
+#
+#     banco       3.09  Lucro/Prejuizo Consolidado do Periodo
+#     seguradora  3.09  Resultado Antes dos Tributos sobre o Lucro
+#     industrial  3.11  Lucro/Prejuizo Consolidado do Periodo
+#
+# E exatamente o que a regra 6 existe para tratar, e a razao de
+# `padrao_ds_conta` existir: o codigo sozinho nao basta, a descricao decide.
+# Ver `tests/test_plano_financeiro.py`.
+@pytest.mark.parametrize("plano", ["INDUSTRIAL", "SEGURADORA"])
+def test_3_09_nao_e_lucro_liquido_nestes_planos(planos, plano):
+    """Aqui 3.09 é resultado ANTES de imposto, e nunca é o lucro líquido."""
     codigos = _conceito(planos, plano, "lucro_liquido")["codigos"]
     assert "3.09" not in codigos, (
         f"{plano}: 3.09 de volta na lista de lucro_liquido. No arquivo real "
