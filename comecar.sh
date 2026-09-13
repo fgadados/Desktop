@@ -336,8 +336,13 @@ B3DSS_DB="$RAIZ/$BANCO" .venv/bin/streamlit run app/main.py &
 _streamlit=$!
 
 _caixa() {
-  # Larguras batidas por printf, nao por espaco contado na mao.
+  # Largura pela linha mais longa, com piso de 60. Fixar a largura quebraria
+  # a caixa quando o caminho do projeto for maior que o esperado -- e o
+  # caminho entra nos comandos prontos abaixo.
   local largura=60 linha
+  for linha in "$@"; do
+    [ "${#linha}" -gt "$largura" ] && largura="${#linha}"
+  done
   local borda; borda="$(printf '─%.0s' $(seq 1 $largura))"
   echo
   echo "${VERDE}┌${borda}┐${FIM}"
@@ -353,12 +358,21 @@ _caixa() {
   # nesses 4 segundos, imprimir "nao esta travada" seria mentir sobre um
   # processo que nao existe mais, e esconder o erro dele.
   kill -0 "$_streamlit" 2>/dev/null || exit 0
+  # Os comandos vao PRONTOS para colar. Dizer "abra outra aba" sem dizer o
+  # que rodar la deixa o passo seguinte por conta do usuario -- e ele ja
+  # digitou `run.py identidade` nesta janela, que e o servidor e nao um
+  # prompt, e sem o `.venv/bin/python` na frente.
   _caixa \
     "  Esta janela agora E o servidor. Nao esta travada." \
+    "  Ela fica assim enquanto a interface estiver no ar." \
     "" \
-    "  Ver os dados  : http://localhost:8501 no navegador" \
-    "  Digitar outra : abra outra aba do Terminal (Cmd+T)" \
-    "  Encerrar      : Ctrl+C aqui" ) &
+    "  Ver os dados : http://localhost:8501 no navegador" \
+    "  Encerrar     : Ctrl+C aqui" \
+    "" \
+    "  Para rodar comando, abra OUTRA aba (Cmd+T) e cole:" \
+    "" \
+    "      cd $RAIZ && .venv/bin/python run.py identidade" \
+    "      cd $RAIZ && .venv/bin/python run.py contas ITUB4" ) &
 
 # `set -e` esta ligado e Ctrl+C faz o `wait` sair com 130. Encerrar assim e o
 # jeito normal de fechar a interface, nao falha: o `|| true` evita que o
