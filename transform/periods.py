@@ -225,6 +225,58 @@ def _chave_conta(df: pd.DataFrame) -> list[str]:
     return base
 
 
+class ChaveDuplicadaError(ValueError):
+    """A chave do fato nao identifica uma linha so -- falta uma dimensao."""
+
+
+def _exigir_chave_unica(df: pd.DataFrame, chave: list[str], lado: str) -> None:
+    """Falha com diagnostico util em vez do despejo cru do pandas.
+
+    Ja aconteceu duas vezes, por dimensoes diferentes -- COLUNA_DF na DMPL e
+    a convivencia ULTIMO/PENULTIMO. O `MergeError` do pandas nao diz qual
+    dimensao falta; esta mensagem diz.
+    """
+    dup = df[df.duplicated(chave, keep=False)]
+    if dup.empty:
+        return
+    exemplo = dup.sort_values(chave).head(6)
+    colunas_uteis = [c for c in ("DT_REFER", "ORDEM_EXERC", "COLUNA_DF", "DS_CONTA")
+                     if c in exemplo.columns]
+    raise ChaveDuplicadaError(
+        f"derivacao do Q4, lado '{lado}': {len(dup)} linhas com chave repetida.\n"
+        f"chave usada: {chave}\n"
+        f"as colunas abaixo distinguem essas linhas e faltam na chave:\n"
+        f"{exemplo[chave + colunas_uteis].to_string(index=False)}"
+    )
+
+
+def _publicacao_mais_recente(df: pd.DataFrame, chave: list[str]) -> pd.DataFrame:
+    """Uma linha por chave: a publicada mais recentemente.
+
+    O mesmo exercicio chega por mais de um documento -- na DFP do proprio ano
+    (ORDEM_EXERC = ULTIMO) e na do ano seguinte, como comparativo
+    (PENULTIMO). Ate a etapa de reapresentacao os dois convivem, entao aqui a
+    chave nao e unica e um merge direto casaria N com N.
+
+    A regra e a mesma da politica de reapresentacao escolhida para o projeto:
+    vence a publicacao de maior DT_REFER, desempatada por VERSAO. Derivar o Q4
+    de dois documentos de epocas diferentes seria pior do que escolher.
+    """
+    if df.empty:
+        return df
+
+    out = df.copy()
+    out["_dt_refer"] = pd.to_datetime(out["DT_REFER"], errors="coerce")
+    if "versao_int" in out.columns:
+        out["_versao"] = pd.to_numeric(out["versao_int"], errors="coerce")
+    else:
+        out["_versao"] = pd.to_numeric(out.get("VERSAO"), errors="coerce")
+
+    out = out.sort_values(chave + ["_dt_refer", "_versao"], kind="mergesort")
+    out = out.groupby(chave, dropna=False, as_index=False).tail(1)
+    return out.drop(columns=["_dt_refer", "_versao"])
+
+
 def derivar_q4(df: pd.DataFrame) -> pd.DataFrame:
     """Regra 5, parte 2: Q4 isolado = DFP anual - ITR acumulado de 9 meses.
 
@@ -240,6 +292,11 @@ def derivar_q4(df: pd.DataFrame) -> pd.DataFrame:
         return df.head(0).assign(origem_periodo=None, src_derivacao=None)
 
     chave = _chave_conta(df)
+    # Cada lado reduzido a uma linha por chave antes do casamento: sem isto o
+    # mesmo exercicio, vindo de dois documentos, produz um merge N-para-N.
+    anual = _publicacao_mais_recente(anual, chave)
+    nove = _publicacao_mais_recente(nove, chave)
+
     esq = anual[chave + ["VL_CONTA_NUM", "DS_CONTA", "DT_FIM_EXERC", "inicio_exercicio",
                          "src_archive", "src_file", "src_line", "src_sha256",
                          "VERSAO", "ORDEM_EXERC", "DT_REFER", "ESCALA_MOEDA", "MOEDA"]]
@@ -255,6 +312,8 @@ def derivar_q4(df: pd.DataFrame) -> pd.DataFrame:
         }
     )
 
+    _exigir_chave_unica(esq, chave, "DFP anual")
+    _exigir_chave_unica(dir_, chave, "ITR acumulado de 9 meses")
     j = esq.merge(dir_, on=chave, how="inner", validate="one_to_one")
     if j.empty:
         return df.head(0).assign(origem_periodo=None, src_derivacao=None)
@@ -298,6 +357,13 @@ def conferir_soma_trimestres(df: pd.DataFrame) -> pd.DataFrame:
     chave = _chave_conta(df)
     if isolados.empty or nove.empty:
         return pd.DataFrame(columns=chave + ["soma_isolados", "acum_9m", "diferenca"])
+
+    # Um trimestre publicado em dois documentos entraria duas vezes na soma e
+    # a conferencia acusaria divergencia que nao existe. Reduz por trimestre
+    # antes de somar, e reduz o acumulado antes de comparar.
+    chave_tri = chave + ["trimestre"]
+    isolados = _publicacao_mais_recente(isolados, chave_tri)
+    nove = _publicacao_mais_recente(nove, chave)
 
     soma = (
         isolados.groupby(chave, dropna=False)
