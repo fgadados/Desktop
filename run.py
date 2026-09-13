@@ -240,7 +240,16 @@ def transformar(args) -> int:
 
     # --- carga --------------------------------------------------------------
     t0 = _etapa(5, N, "calculando indicadores e carregando o banco")
-    con = load.conectar()
+    try:
+        con = load.conectar()
+    except load.BancoEmUsoError as exc:
+        # Recado, nao traceback: o usuario acabou de esperar 2 minutos de
+        # extracao e a causa e uma janela aberta noutra aba.
+        print(f"\n{exc}", file=sys.stderr)
+        print("\n  Os brutos ja baixados continuam em data/parquet/ -- quando "
+              "rodar de novo,\n  nada e rebaixado e a transformacao retoma daqui.",
+              file=sys.stderr)
+        return 1
     n = load.substituir(con, "fato_contabil", pipeline.para_db(fatos))
     load.substituir(con, "teste_identidade", resultado["identidades"])
     load.substituir(con, "reapresentacao", _para_reapresentacao(resultado["reapresentacoes"]))

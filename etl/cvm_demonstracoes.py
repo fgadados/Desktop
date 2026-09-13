@@ -135,7 +135,28 @@ def extrair(doc: str, anos: list[int] | None = None) -> dict[str, Path]:
     """Extrai todos os anos disponiveis (ou os pedidos) de DFP ou ITR."""
     pacotes = cvm_common.listar_pacotes(doc)
     if anos is not None:
+        achados = {cvm_common.ano_do_pacote(u) for u in pacotes}
         pacotes = [u for u in pacotes if cvm_common.ano_do_pacote(u) in set(anos)]
+
+        # Ano pedido que o diretorio da CVM nao tem era descartado em silencio.
+        # Aconteceu em 13/09/2026: DFP e ITR de 2025 sumiram do diretorio entre
+        # duas execucoes, a extracao relatou sucesso, e 4,8 milhoes de fatos --
+        # um ano inteiro da carteira -- simplesmente deixaram de existir. A
+        # serie ficou com um buraco que so apareceu porque alguem foi conferir
+        # trimestre a trimestre.
+        #
+        # Pelo criterio de `etl/avisos.py` isto e AVISO, nao falha dura: o que
+        # ha e dado faltando, nao numero errado. Mas nao pode ser silencio.
+        faltando = sorted(set(anos) - achados)
+        if faltando:
+            avisos.avisar(
+                f"diretorio {doc} da CVM", "ano_sem_pacote",
+                f"anos pedidos que o diretorio nao lista: {faltando}. "
+                f"Anos disponiveis: {sorted(a for a in achados if a)}. "
+                "A serie fica SEM esses anos -- nenhum numero fica errado, mas "
+                "o periodo correspondente vai faltar na interface.",
+            )
+
     if not pacotes:
         raise FileNotFoundError(
             f"nenhum pacote {doc} encontrado no diretorio da CVM para anos={anos}"

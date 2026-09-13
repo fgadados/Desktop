@@ -36,6 +36,10 @@ SCHEMA = Path(__file__).parent / "schema.sql"
 NAO_DETERMINISTICAS = {"execucao", "schema_versao"}
 
 
+class BancoEmUsoError(RuntimeError):
+    """Outro processo segura o banco. Quase sempre a interface aberta."""
+
+
 def impressao_schema() -> str:
     """sha256 do `schema.sql` vigente."""
     return hashlib.sha256(SCHEMA.read_bytes()).hexdigest()
@@ -67,24 +71,81 @@ def _apagar(p: Path) -> None:
     Path(str(p) + ".wal").unlink(missing_ok=True)
 
 
+def _abrir(p: Path) -> duckdb.DuckDBPyConnection:
+    """Abre para escrita, ou diz que outro processo esta com o banco."""
+    try:
+        return duckdb.connect(str(p))
+    except duckdb.IOException as exc:
+        if "lock" not in str(exc).lower():
+            raise
+        # O DuckDB aceita UM escritor ou varios leitores, nunca os dois. A
+        # interface Streamlit abre o banco em modo leitura e o segura enquanto
+        # estiver no ar, entao `transformar` com a interface aberta morre aqui
+        # -- depois de 2 minutos de extracao, com um traceback que fala de
+        # "conflicting lock" e nao diz o obvio: feche a interface.
+        raise BancoEmUsoError(
+            f"{p.name} esta aberto por outro processo.\n"
+            "  Quase sempre e a interface: o Streamlit segura o banco enquanto\n"
+            "  estiver no ar. Va na janela onde ele roda e aperte Ctrl+C, ou\n"
+            "  feche aquela aba do Terminal, e rode isto de novo.\n"
+            f"\n  Mensagem original do DuckDB:\n  {exc}"
+        ) from exc
+
+
 def conectar(caminho: Path | None = None, *, avisar=print) -> duckdb.DuckDBPyConnection:
     p = Path(caminho or DUCKDB_PATH)
     p.parent.mkdir(parents=True, exist_ok=True)
     sql = SCHEMA.read_text(encoding="utf-8")
     impressao = impressao_schema()
 
-    if p.exists():
-        gravada = _impressao_gravada(p)
-        if gravada != impressao:
-            avisar(
-                f"      schema mudou desde que {p.name} foi criado "
-                f"({'sem registro' if gravada is None else gravada[:12]} -> "
-                f"{impressao[:12]}). Recriando o banco a partir dos Parquet -- "
-                "nenhum dado se perde, o banco e derivado."
-            )
-            _apagar(p)
+    # A trava vem ANTES de qualquer decisao sobre apagar. A ordem inversa --
+    # conferir a impressao lendo o arquivo, apagar, e so entao tentar abrir --
+    # destruia o banco de quem estivesse com a interface aberta: a leitura
+    # falhava por causa da trava, `_impressao_gravada` devolvia None, o codigo
+    # concluia "schema mudou" e apagava o arquivo. Depois a abertura falhava
+    # na trava e o usuario ficava sem banco nenhum.
+    existia = p.exists()
+    try:
+        con = _abrir(p)
+    except duckdb.IOException as exc:
+        # Nao e trava (isso `_abrir` ja converteu): e arquivo ilegivel --
+        # corrompido, ou gravado por outra versao do DuckDB. Vale a mesma
+        # regra do schema desatualizado: o banco e derivado, entao refazer
+        # custa uma transformacao. Mas dizendo, nunca calado.
+        if not existia:
+            raise
+        avisar(f"      {p.name} nao abre ({exc}). Recriando a partir dos "
+               "Parquet -- nenhum dado se perde, o banco e derivado.")
+        _apagar(p)
+        existia = False
+        con = _abrir(p)
 
-    con = duckdb.connect(str(p))
+    gravada = None
+    if existia:
+        try:
+            tem_tabela = con.execute(
+                "SELECT count(*) FROM information_schema.tables "
+                "WHERE table_schema = 'main' AND table_name = 'schema_versao'"
+            ).fetchone()[0]
+            if tem_tabela:
+                linha = con.execute("SELECT impressao FROM schema_versao").fetchone()
+                gravada = linha[0] if linha else None
+        except duckdb.Error:
+            gravada = None
+
+    # Banco novo nao "mudou de schema": ele nasce com o vigente. Anunciar
+    # recriacao ali seria ruido a cada primeira execucao.
+    if existia and gravada != impressao:
+        avisar(
+            f"      schema mudou desde que {p.name} foi criado "
+            f"({'sem registro' if gravada is None else gravada[:12]} -> "
+            f"{impressao[:12]}). Recriando o banco a partir dos Parquet -- "
+            "nenhum dado se perde, o banco e derivado."
+        )
+        con.close()
+        _apagar(p)
+        con = _abrir(p)
+
     con.execute(sql)
     con.execute("DELETE FROM schema_versao")
     con.execute("INSERT INTO schema_versao VALUES (?, now())", [impressao])
