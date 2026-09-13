@@ -130,10 +130,30 @@ def _ler(nome: str) -> pd.DataFrame | None:
     return pd.read_parquet(caminho) if caminho.exists() else None
 
 
+def _mil(n: int) -> str:
+    """Separador de milhar no padrao brasileiro, sem estragar o resto da frase."""
+    return f"{n:,}".replace(",", ".")
+
+
+def _etapa(numero: int, total: int, texto: str) -> float:
+    """Anuncia a etapa ANTES de comecar. Silencio prolongado durante trabalho
+    pesado e indistinguivel de travamento -- ja custou duas rodadas."""
+    print(f"  [{numero}/{total}] {texto}...", flush=True)
+    return time.monotonic()
+
+
+def _fim(numero: int, total: int, texto: str, t0: float, detalhe: str = "") -> None:
+    seg = time.monotonic() - t0
+    extra = f" -- {detalhe}" if detalhe else ""
+    print(f"  [{numero}/{total}] ok {texto} ({seg:.0f}s){extra}\n", flush=True)
+
+
 def transformar(args) -> int:
     cfg = _config()
     tickers = [t.upper() for t in cfg["tickers"]]
+    N = 6
 
+    t0 = _etapa(1, N, "lendo os brutos de data/parquet")
     dfp = _ler("cvm/dfp_fatos.parquet")
     itr = _ler("cvm/itr_fatos.parquet")
     if dfp is None and itr is None:
@@ -146,8 +166,12 @@ def transformar(args) -> int:
     fca = _ler("cvm/fca_valor_mobiliario.parquet")
     cot = _ler("b3/cotahist.parquet")
     sgs = _ler("bcb/sgs.parquet")
+    _fim(1, N, "brutos lidos", t0,
+         f"{_mil(len(brutos))} fatos da CVM, "
+         f"{_mil(0 if cot is None else len(cot))} cotacoes")
 
     # --- de-para (regra 1) -------------------------------------------------
+    t0 = _etapa(2, N, "de-para CNPJ x ticker (regra 1)")
     cot_vista = b3_cotahist.somente_acoes_a_vista(cot) if cot is not None else None
     mapa = depara.construir(fca, cot_vista) if fca is not None else pd.DataFrame()
     if not mapa.empty:
@@ -156,20 +180,33 @@ def transformar(args) -> int:
     if not cnpjs:
         print("nenhum ticker do config resolveu para CNPJ via FCA. "
               "Confira o relatorio de divergencias.", file=sys.stderr)
+    _fim(2, N, "de-para", t0,
+         f"{len(cnpjs)} empresa(s) para {len(tickers)} ticker(s) pedidos")
 
     # --- fundamentos (regras 2 a 6) ---------------------------------------
+    t0 = _etapa(3, N, "normalizando fatos: versao, ordem, periodo, base "
+                      "(regras 2 a 5)")
     brutos["CNPJ_CIA"] = depara.normalizar_cnpj(brutos["CNPJ_CIA"])
     if cnpjs:
         brutos = brutos[brutos["CNPJ_CIA"].isin(cnpjs)]
+    print(f"      {_mil(len(brutos))} fatos das empresas selecionadas", flush=True)
     resultado = pipeline.normalizar_fatos(brutos)
     fatos = resultado["fatos"]
+    _fim(3, N, "normalizacao", t0, f"{_mil(len(fatos))} fatos")
 
+    t0 = _etapa(4, N, "classificando setor (regra 6)")
     classificacao = (
         sector.classificar(cad) if cad is not None else pd.DataFrame(columns=["cnpj", "plano"])
     )
     plano_por_cnpj = dict(zip(classificacao["cnpj"], classificacao["plano"]))
+    if cnpjs:
+        planos = {c: plano_por_cnpj.get(c, "INDEFINIDO") for c in cnpjs}
+        for c, p in sorted(planos.items()):
+            print(f"      {c}: {p}", flush=True)
+    _fim(4, N, "classificacao", t0)
 
     # --- carga --------------------------------------------------------------
+    t0 = _etapa(5, N, "calculando indicadores e carregando o banco")
     con = load.conectar()
     n = load.substituir(con, "fato_contabil", pipeline.para_db(fatos))
     load.substituir(con, "teste_identidade", resultado["identidades"])
@@ -190,7 +227,9 @@ def transformar(args) -> int:
     _carregar_fontes(con)
     load.substituir(con, "aviso", avisos.para_quadro())
     load.registrar_execucao(con, "transformar", n, observacao=f"{len(cnpjs)} empresas")
+    _fim(5, N, "carga", t0, f"{_mil(n)} fatos no banco")
 
+    t0 = _etapa(6, N, "resumo")
     identidades = resultado["identidades"]
     from transform.validations import resumo
 
@@ -199,7 +238,11 @@ def transformar(args) -> int:
     print(f"  reapresentacoes      : {len(resultado['reapresentacoes'])}")
     print(f"  soma T1..T3 vs 9M    : {len(resultado['soma_trimestres_divergente'])} divergencias")
     print(f"  fora de REAL         : {len(resultado['outra_moeda'])} linhas ignoradas")
+    print(f"  avisos               : {len(avisos.registrados())}")
     con.close()
+    print(f"\nBanco pronto. Para ver os dados:"
+          f"\n    ./comecar.sh pagina      -> empresas.html + empresas.csv"
+          f"\n    streamlit run app/main.py -> interface completa")
     return 0
 
 
