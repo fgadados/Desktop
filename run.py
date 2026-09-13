@@ -1,15 +1,20 @@
 #!/usr/bin/env python3
 """CLI do pipeline. Idempotente: rodar duas vezes nao altera o resultado.
 
-    python run.py extrair            # baixa brutos das fontes oficiais
-    python run.py transformar        # aplica as 6 regras e carrega o DuckDB
-    python run.py tudo               # extrair + transformar
-    python run.py diagnostico        # so imprime o estado, sem escrever nada
-    python run.py demo               # roda tudo com dados SINTETICOS, sem rede
-    python run.py pagina             # gera empresas.html + empresas.csv
-    python run.py contas BBSE3       # plano de contas REAL de uma empresa
-    python run.py identidade         # onde o balanco nao fecha, e por quanto
-    python run.py bruto ITUB4        # o que a CVM entregou, antes das regras
+Chame pelo atalho `./b3`, que usa o Python do projeto sozinho:
+
+    ./b3 extrair            # baixa brutos das fontes oficiais
+    ./b3 transformar        # aplica as 6 regras e carrega o DuckDB
+    ./b3 tudo               # extrair + transformar
+    ./b3 diagnostico        # so imprime o estado, sem escrever nada
+    ./b3 demo               # roda tudo com dados SINTETICOS, sem rede
+    ./b3 pagina             # gera empresas.html + empresas.csv
+    ./b3 contas BBSE3       # plano de contas REAL de uma empresa
+    ./b3 identidade         # onde o balanco nao fecha, e por quanto
+    ./b3 bruto ITUB4        # o que a CVM entregou, antes das regras
+
+`./run.py identidade` e `python3 run.py identidade` tambem funcionam: o
+arquivo se reexecuta no .venv quando chamado com outro interpretador.
 
 Cada etapa e separada de proposito: a extracao depende de rede e e a unica
 parte nao reproduzivel offline. `transformar` roda inteiramente a partir dos
@@ -17,6 +22,27 @@ Parquet em `data/parquet/`.
 """
 
 from __future__ import annotations
+
+if __name__ == "__main__":
+    # Reexecuta no Python do projeto quando chamado com outro interpretador.
+    # Sem isto, `./run.py identidade` ou `python3 run.py identidade` morrem no
+    # primeiro `import pandas`, porque as dependencias estao no .venv -- um
+    # erro de interpretador disfarcado de erro de biblioteca.
+    #
+    # Tem que vir ANTES dos imports pesados, e so quando o arquivo e executado
+    # como programa: importado como modulo (os testes fazem isso) nao reexecuta
+    # nada. O guarda de ambiente corta qualquer laco.
+    import os as _os
+    import sys as _sys
+    from pathlib import Path as _Path
+
+    _venv = _Path(__file__).resolve().parent / ".venv" / "bin" / "python"
+    if (_venv.exists()
+            and _Path(_sys.executable).resolve() != _venv
+            and not _os.environ.get("B3DSS_SEM_REEXEC")):
+        _os.environ["B3DSS_SEM_REEXEC"] = "1"
+        _os.execv(str(_venv), [str(_venv), str(_Path(__file__).resolve()),
+                               *_sys.argv[1:]])
 
 import argparse
 import re

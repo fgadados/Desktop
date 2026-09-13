@@ -371,8 +371,8 @@ _caixa() {
     "" \
     "  Para rodar comando, abra OUTRA aba (Cmd+T) e cole:" \
     "" \
-    "      cd $RAIZ && .venv/bin/python run.py identidade" \
-    "      cd $RAIZ && .venv/bin/python run.py contas ITUB4" ) &
+    "      cd $RAIZ && ./b3 identidade" \
+    "      cd $RAIZ && ./b3 contas ITUB4" ) &
 
 # `set -e` esta ligado e Ctrl+C faz o `wait` sair com 130. Encerrar assim e o
 # jeito normal de fechar a interface, nao falha: o `|| true` evita que o
