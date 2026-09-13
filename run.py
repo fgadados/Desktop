@@ -692,6 +692,32 @@ def contas(args) -> int:
     print(f"SETOR_ATIV : {cab[1]}")
     print(f"plano      : {cab[2]}   [{cab[3]}]\n")
 
+    if getattr(args, "periodos", False):
+        # Serve para responder "este periodo existe?" sem supor. Um periodo
+        # ausente e coisa diferente de um periodo que fecha: o primeiro e
+        # dado que nao chegou, o segundo e dado conferido.
+        linhas = con.execute(
+            "SELECT f.periodo, f.dt_fim_exerc, count(*) AS contas, "
+            "       min(f.src_file) AS arquivo, "
+            "       coalesce(max(t.status), '-') AS identidade "
+            "FROM fato_contabil f "
+            "LEFT JOIN teste_identidade t "
+            "       ON t.cnpj = f.cnpj AND t.base = f.base AND t.periodo = f.periodo "
+            "WHERE f.cnpj = ? AND f.demonstrativo = 'BPA' AND f.cd_conta = '1' "
+            "GROUP BY 1, 2 ORDER BY f.dt_fim_exerc, f.periodo", [cnpj]
+        ).fetchall()
+        con.close()
+        if not linhas:
+            print("nenhum balanco carregado para esta empresa.", file=sys.stderr)
+            return 1
+        print(f"{len(linhas)} periodo(s) com balanco (conta 1, BPA):\n")
+        print(f"  {'periodo':<10s} {'data do saldo':<14s} {'identidade':<11s} arquivo")
+        for periodo, dt, _n, arquivo, status in linhas:
+            print(f"  {periodo:<10s} {str(dt):<14s} {status:<11s} {arquivo}")
+        print("\nPeriodo que NAO aparece aqui nao esta no banco -- nao e o mesmo "
+              "que periodo que fecha a identidade.")
+        return 0
+
     periodo = con.execute(
         "SELECT periodo FROM fato_contabil WHERE cnpj = ? "
         "ORDER BY dt_fim_exerc DESC NULLS LAST LIMIT 1", [cnpj]
@@ -810,6 +836,8 @@ def main() -> int:
     sub.add_parser("schema").set_defaults(fn=schema)
     ct = sub.add_parser("contas")
     ct.add_argument("empresa", help="ticker (BBSE3) ou CNPJ")
+    ct.add_argument("--periodos", action="store_true",
+                    help="lista os periodos com balanco, em vez das contas")
     ct.set_defaults(fn=contas)
     sub.add_parser("identidade").set_defaults(fn=identidade)
     pag = sub.add_parser("pagina")
