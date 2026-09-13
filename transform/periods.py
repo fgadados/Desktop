@@ -89,7 +89,16 @@ def _inicio_exercicio(df: pd.DataFrame) -> pd.Series:
     chave = [c for c in _CHAVE_DOC if c in df.columns]
     fluxo = df[df["tipo_janela"] != INSTANTE].copy()
     if fluxo.empty:
-        return pd.Series(pd.NaT, index=df.index, name="inicio_exercicio")
+        # So balanco, nenhuma linha de fluxo: nao ha como observar o inicio do
+        # exercicio. Antes isto devolvia NaT e o saldo ficava sem periodo
+        # ("?"), o que so nao aparecia porque `rotular_saldos` herdava o
+        # trimestre do documento. Recua para o ano civil -- ver o comentario
+        # do mesmo recuo mais abaixo.
+        return pd.Series(
+            [_inicio_ancorado(f, 1, 1) if pd.notna(f) else pd.NaT
+             for f in df["DT_FIM_EXERC"]],
+            index=df.index, name="inicio_exercicio", dtype="datetime64[ns]",
+        )
 
     idx = fluxo.groupby(chave, dropna=False)["meses_janela"].idxmax()
     por_doc = fluxo.loc[idx, chave + ["DT_INI_EXERC", "meses_janela"]].rename(
@@ -121,6 +130,14 @@ def _inicio_exercicio(df: pd.DataFrame) -> pd.Series:
             inicios.append(ini_doc)
         elif cnpj in ancora and pd.notna(fim):
             inicios.append(_inicio_ancorado(fim, *ancora[cnpj]))
+        elif pd.isna(ini_doc) and pd.notna(fim):
+            # Documento so de balanco: nao ha linha de fluxo de onde tirar o
+            # inicio do exercicio, e sem ele o saldo nao teria periodo nenhum.
+            # Recua para o ano civil, que e o exercicio social da esmagadora
+            # maioria e o padrao da CVM. Se a companhia tiver exercicio
+            # deslocado, algum documento dela traz fluxo e a ancora acima
+            # vence -- este ramo so pega quem nao tem nenhuma.
+            inicios.append(_inicio_ancorado(fim, 1, 1))
         else:
             inicios.append(ini_doc)
     return pd.Series(pd.to_datetime(inicios), index=df.index, name="inicio_exercicio")
@@ -145,12 +162,11 @@ def indice_trimestre(df: pd.DataFrame) -> pd.DataFrame:
 
     meses_ate_fim = _meses(out["inicio_exercicio"], out["DT_FIM_EXERC"])
     out["trimestre"] = (meses_ate_fim / 3).round().astype("Int64")
-    out.loc[out["tipo_janela"] == INSTANTE, "trimestre"] = pd.NA
     out["ano_exercicio"] = out["inicio_exercicio"].dt.year
-    # Saldo: o exercicio e o do proprio fechamento.
-    out.loc[out["tipo_janela"] == INSTANTE, "ano_exercicio"] = out.loc[
-        out["tipo_janela"] == INSTANTE, "DT_FIM_EXERC"
-    ].dt.year
+    # O saldo patrimonial usa a MESMA conta: `inicio_exercicio` ja e ancorado
+    # na data do proprio saldo (ver `_inicio_ancorado`), entao um balanco de
+    # 31/12/2019 cai em 2019T4 venha ele de onde vier. Ver `rotular_saldos`
+    # para o porque de isto nao poder ser herdado do documento.
     return out
 
 
@@ -170,34 +186,41 @@ _CHAVE_ENTREGA = ["CNPJ_CIA", "DT_REFER", "doc", "base", "ordem_exerc_norm"]
 
 
 def rotular_saldos(df: pd.DataFrame) -> pd.DataFrame:
-    """Da ao saldo patrimonial o trimestre do documento em que ele veio.
+    """Marca o saldo que fecha o exercicio. O periodo ja veio da data dele.
 
-    BPA/BPP nao tem periodo proprio -- sao saldo numa data. O trimestre
-    correto e o do documento: o balanco de um ITR do 2o trimestre fecha em
-    T2, o de uma DFP fecha em T4. Sem isto, P/VP nao consegue casar
-    patrimonio liquido com lucro do mesmo trimestre.
+    Esta funcao herdava o trimestre do DOCUMENTO, com o argumento de que "o
+    balanco de um ITR do 2o trimestre fecha em T2". Isso vale para a coluna
+    ULTIMO e e FALSO para a PENULTIMA. Num relatorio intermediario as duas
+    colunas usam convencoes de comparativo diferentes:
+
+        DRE      compara com o mesmo periodo do ano anterior;
+        BALANCO  compara com o FECHAMENTO do exercicio anterior (31/12).
+
+    O codigo aplicava a regra da DRE tambem ao balanco. Resultado, visto no
+    dado real do Itau em 13/09/2026: o ITR de 2020T1 traz o balanco de
+    31/12/2019 e o sistema carimbava 2019T1. Os quatro trimestres de 2019
+    ficavam com o MESMO saldo, o de 31 de dezembro.
+
+        2019     1.637.481.000.000   do DFP de 2020
+        2019T1   1.637.481.000.000   do ITR de 2020T1   <- e 31/12/2019
+        2019T2   1.637.481.000.000   do ITR de 2020T2   <- e 31/12/2019
+        2019T3   1.637.481.000.000   do ITR de 2020T3   <- e 31/12/2019
+
+    `indice_trimestre` agora rotula o saldo pela data dele proprio, o que vale
+    para as duas colunas. Efeito colateral aceito (decisao do usuario): um
+    trimestre antigo cujo ITR proprio nao foi baixado deixa de ter balanco, em
+    vez de exibir o de 31/12. Faltou, aparece como faltando.
+
+    Resta so marcar quem fecha o exercicio: esse saldo entra na serie anual e
+    na trimestral, sob os dois rotulos.
     """
     out = df.copy()
-    chave = [c for c in _CHAVE_ENTREGA if c in out.columns]
-    fluxo = out[(out["tipo_janela"] != INSTANTE) & out["trimestre"].notna()]
-    if fluxo.empty:
-        return out
-
-    doc = (
-        fluxo.assign(_e_anual=(fluxo["tipo_janela"] == ANUAL))
-        .groupby(chave, dropna=False)
-        .agg(_tri_doc=("trimestre", "max"), _ano_doc=("ano_exercicio", "max"),
-             _doc_anual=("_e_anual", "any"))
-        .reset_index()
-    )
-    out = out.merge(doc, on=chave, how="left")
     saldo = out["tipo_janela"] == INSTANTE
-    out.loc[saldo, "trimestre"] = out.loc[saldo, "_tri_doc"]
-    out.loc[saldo & out["_ano_doc"].notna(), "ano_exercicio"] = out.loc[
-        saldo & out["_ano_doc"].notna(), "_ano_doc"
-    ]
-    out["saldo_de_exercicio_anual"] = saldo & out["_doc_anual"].fillna(False)
-    return out.drop(columns=["_tri_doc", "_ano_doc", "_doc_anual"])
+    # Fecha o exercicio quando a data do saldo e o fim do exercicio social --
+    # 12 meses depois do inicio, independente do documento que o trouxe.
+    fecha = saldo & out["trimestre"].eq(4)
+    out["saldo_de_exercicio_anual"] = fecha.fillna(False)
+    return out
 
 
 def somente_isolados(df: pd.DataFrame) -> pd.DataFrame:
