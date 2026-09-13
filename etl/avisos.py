@@ -28,12 +28,27 @@ os arquivos da CVM e da B3:
 
 Aviso não é silêncio: fica registrado, é impresso ao fim da execução e vai
 para a tabela `aviso` do banco, com a origem.
+
+Dois processos, um registro
+---------------------------
+`_REGISTRO` é global por PROCESSO, e `run.py extrair` e `run.py transformar`
+são dois. Os avisos da extração morriam no fim dela: o log dizia "2 aviso(s)"
+e, minutos depois, "avisos: 0" -- e a tabela `aviso` do banco saía vazia,
+contrariando o parágrafo acima. Aviso que não chega ao banco é exatamente o
+silêncio que este módulo existe para impedir.
+
+Por isso a extração grava o registro em `data/avisos.json` ao terminar, e a
+transformação carrega esse arquivo antes de montar a tabela. O arquivo é
+sobrescrito a cada extração: ele descreve a rodada que produziu os Parquet
+que estão em disco, não um histórico.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import json
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 
 
 @dataclass(frozen=True)
@@ -65,6 +80,50 @@ def registrados() -> list[Aviso]:
 def limpar() -> None:
     """Só para os testes: o registro é global por processo."""
     _REGISTRO.clear()
+    _HERDADOS.clear()
+
+
+# Avisos de um processo ANTERIOR desta mesma rodada (tipicamente a extração).
+# Ficam separados de `_REGISTRO` para que `resumo()` continue falando só do
+# processo corrente, que é o que o usuário está vendo rodar.
+_HERDADOS: list[Aviso] = []
+
+
+def _arquivo_padrao() -> Path:
+    from etl.config import DATA
+
+    return Path(DATA) / "avisos.json"
+
+
+def persistir(caminho: Path | None = None) -> Path:
+    """Grava os avisos deste processo, para o próximo processo da rodada."""
+    p = Path(caminho) if caminho else _arquivo_padrao()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(
+        json.dumps([asdict(a) for a in _REGISTRO], ensure_ascii=False, indent=1),
+        encoding="utf-8",
+    )
+    return p
+
+
+def herdar(caminho: Path | None = None) -> int:
+    """Carrega os avisos gravados pelo processo anterior. Devolve quantos.
+
+    Arquivo ausente ou ilegível não é erro: a transformação pode ser rodada
+    sozinha, sem extração nenhuma antes dela.
+    """
+    p = Path(caminho) if caminho else _arquivo_padrao()
+    _HERDADOS.clear()
+    try:
+        bruto = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return 0
+    for d in bruto:
+        try:
+            _HERDADOS.append(Aviso(**d))
+        except TypeError:
+            continue  # formato de outra versao: ignora a linha, nao a rodada
+    return len(_HERDADOS)
 
 
 def resumo() -> str:
@@ -80,11 +139,14 @@ def resumo() -> str:
 
 
 def para_quadro():
+    """Tudo que vai para a tabela `aviso`: este processo mais os herdados."""
     import pandas as pd
 
-    if not _REGISTRO:
-        return pd.DataFrame(columns=["origem", "categoria", "mensagem", "registrado_em"])
-    return pd.DataFrame(
-        [{"origem": a.origem, "categoria": a.categoria, "mensagem": a.mensagem,
-          "registrado_em": a.registrado_em} for a in _REGISTRO]
-    )
+    colunas = ["origem", "categoria", "mensagem", "registrado_em"]
+    todos = _HERDADOS + _REGISTRO
+    if not todos:
+        return pd.DataFrame(columns=colunas)
+    quadro = pd.DataFrame([asdict(a) for a in todos])[colunas]
+    # O mesmo aviso pode chegar pelos dois caminhos se a transformacao rodar
+    # no mesmo processo da extracao (`run.py tudo`).
+    return quadro.drop_duplicates().reset_index(drop=True)

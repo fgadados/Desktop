@@ -102,6 +102,9 @@ def extrair(args) -> int:
 
     print(f"\n{len(provenance.manifesto())} arquivos no manifesto de proveniencia "
           f"({time.monotonic() - inicio_total:.0f}s no total).")
+    # A transformacao roda noutro processo e nao enxerga `_REGISTRO`. Sem isto
+    # os avisos da extracao nunca chegam a tabela `aviso` do banco.
+    avisos.persistir()
     print(avisos.resumo())
     if not falhas:
         return 0
@@ -153,6 +156,7 @@ def transformar(args) -> int:
     cfg = _config()
     tickers = [t.upper() for t in cfg["tickers"]]
     N = 6
+    herdados = avisos.herdar()  # avisos da extracao, gravados noutro processo
 
     t0 = _etapa(1, N, "lendo os brutos de data/parquet")
     dfp = _ler("cvm/dfp_fatos.parquet")
@@ -239,7 +243,9 @@ def transformar(args) -> int:
     print(f"  reapresentacoes      : {len(resultado['reapresentacoes'])}")
     print(f"  soma T1..T3 vs 9M    : {len(resultado['soma_trimestres_divergente'])} divergencias")
     print(f"  fora de REAL         : {len(resultado['outra_moeda'])} linhas ignoradas")
-    print(f"  avisos               : {len(avisos.registrados())}")
+    proprios = len(avisos.registrados())
+    herdado = f" (+{herdados} da extracao)" if herdados else ""
+    print(f"  avisos               : {proprios}{herdado}")
     con.close()
     print(f"\nBanco pronto. Para ver os dados:"
           f"\n    ./comecar.sh pagina      -> empresas.html + empresas.csv"

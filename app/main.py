@@ -96,6 +96,30 @@ def _limpar_nulos(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def _tabela_ou_aviso(df: pd.DataFrame, vazio: str) -> None:
+    """Mostra a tabela, ou a frase que explica por que ela nao esta ali.
+
+    Isto era um ternario escrito como COMANDO:
+
+        st.dataframe(df, ...) if not df.empty else st.write("...")
+
+    O Streamlit reescreve toda expressao solta em `st.write(...)` -- e o
+    "magic" que faz uma variavel sozinha virar saida na tela. O valor aqui e
+    um DeltaGenerator, entao caia em `st.help()`, que tenta `ast.parse` da
+    linha de origem; como o comando continuava na linha seguinte, o parse
+    recebia codigo truncado e a aba inteira morria com
+
+        SyntaxError: '(' was never closed
+
+    apontando para a linha certa e para a causa errada. `if/else` de verdade
+    nao vira expressao e nao passa pelo magic.
+    """
+    if df.empty:
+        st.write(vazio)
+        return
+    st.dataframe(df, width="stretch", hide_index=True)
+
+
 def _ficha_da_fonte(empresas: pd.DataFrame, cnpj: str) -> None:
     """Criterio de aceite: data e versao do ultimo documento CVM processado."""
     linha = empresas[empresas["cnpj"] == cnpj].iloc[0]
@@ -375,13 +399,11 @@ def _qualidade(cnpj: str, ticker: str) -> None:
         "O valor original e preservado e a divergencia aparece aqui."
     )
     rea = dados.consultar("SELECT * FROM reapresentacao WHERE cnpj = ?", (cnpj,))
-    st.dataframe(rea, width="stretch", hide_index=True) if not rea.empty else st.write(
-        "Nenhuma reapresentacao detectada."
-    )
+    _tabela_ou_aviso(rea, "Nenhuma reapresentacao detectada.")
 
     st.subheader("Cobertura de ajuste de precos")
     cob = dados.cobertura(ticker)
-    st.dataframe(cob, width="stretch", hide_index=True) if not cob.empty else st.write("-")
+    _tabela_ou_aviso(cob, "Sem cobertura de ajuste registrada para este ticker.")
     susp = dados.consultar("SELECT * FROM evento_suspeito WHERE ticker = ?", (ticker,))
     if not susp.empty:
         st.warning(
@@ -393,9 +415,7 @@ def _qualidade(cnpj: str, ticker: str) -> None:
 
     st.subheader("De-para CNPJ x ticker")
     div = dados.consultar("SELECT * FROM depara_divergencia")
-    st.dataframe(div, width="stretch", hide_index=True) if not div.empty else st.write(
-        "Sem divergencia entre FCA e COTAHIST."
-    )
+    _tabela_ou_aviso(div, "Sem divergencia entre FCA e COTAHIST.")
 
     st.subheader("Proveniencia dos arquivos")
     st.dataframe(

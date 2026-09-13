@@ -30,6 +30,7 @@ o que roda aqui é a mesma linha de comando que roda no Mac.
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -167,6 +168,14 @@ def banco(tmp_path_factory):
     _cotahist().to_parquet(pq / "b3" / "cotahist.parquet")
     _sgs().to_parquet(pq / "bcb" / "sgs.parquet")
 
+    # Aviso gravado pela extração, que roda noutro processo. Sem este arquivo
+    # o `transformar` grava a tabela `aviso` vazia mesmo tendo havido aviso.
+    (dados / "avisos.json").write_text(json.dumps([{
+        "origem": "COTAHIST_A2026.TXT", "categoria": "trailer_cotahist",
+        "mensagem": "rodape declara 2776182 e foram lidos 2776184",
+        "registrado_em": "2026-09-13T00:00:00+00:00",
+    }]), encoding="utf-8")
+
     env = {**os.environ, "B3DSS_DATA": str(dados), "PYTHONUNBUFFERED": "1"}
 
     def rodar(rotulo: str) -> str:
@@ -212,6 +221,7 @@ TABELAS_OBRIGATORIAS = [
     "serie_macro",
     "indicador",
     "indicador_entrada",
+    "aviso",              # vem da extracao, que roda noutro processo
     "execucao",
 ]
 
