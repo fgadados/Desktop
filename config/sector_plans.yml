@@ -21,9 +21,19 @@
 # `nao_se_aplica` lista os conceitos que nao existem naquele plano. Indicador
 # que depende deles aparece na interface como NAO_SE_APLICA, com o motivo.
 #
-# ATENCAO: os codigos abaixo foram declarados a partir do plano de contas
-# padronizado da CVM e NAO foram confrontados com arquivo real nesta
-# instalacao. `tests/contract/` confronta; ate la, trate como hipotese.
+# O que ja foi confrontado com arquivo real
+# -----------------------------------------
+#   SEGURADORA  confrontado em 13/09/2026 contra BBSE3, ITR CON 2026T2
+#               (214 contas). Ver o comentario do proprio plano.
+#   INDUSTRIAL  parcial: BPA/BPP/DRE conferidos indiretamente, via as empresas
+#               industriais da carteira que fecham a identidade contabil.
+#   FINANCEIRO  NAO confrontado. Trate como hipotese ate rodar
+#               `python run.py contas ITUB4` e conferir conta a conta.
+#   ENERGIA     herda INDUSTRIAL.
+#
+# `python run.py contas TICKER` imprime o plano real de uma empresa, com
+# arquivo e linha de cada conta. E assim que este arquivo deve ser atualizado
+# -- nunca de memoria.
 
 deteccao:
   # Aplicado sobre CAD_CIA.SETOR_ATIV, sem acento e em caixa alta. A primeira
@@ -114,7 +124,16 @@ planos:
         demonstrativo: DRE
         padrao_ds_conta: "RESULTADO FINANCEIRO"
       lucro_liquido:
-        codigos: ["3.11", "3.09"]
+        # 3.09 foi REMOVIDO da lista em 13/09/2026. No arquivo real da CVM ele
+        # e "Resultado Antes dos Tributos sobre o Lucro" -- que contem a
+        # palavra "Lucro" e portanto casava com o padrao abaixo. Bastava a
+        # companhia nao publicar 3.11 para o sistema entregar lucro ANTES de
+        # imposto como lucro liquido, calado. Na BBSE3 seriam R$ 470 milhoes
+        # a mais num trimestre, 16%.
+        #
+        # Resultado antes de imposto nao e aproximacao de lucro liquido: e
+        # outro numero. Sem 3.11, o certo e FALTANDO.
+        codigos: ["3.11"]
         demonstrativo: DRE
         padrao_ds_conta: "LUCRO|PREJUIZO"
       fco:
@@ -160,7 +179,16 @@ planos:
         demonstrativo: DRE
         padrao_ds_conta: "INTERMEDIACAO FINANCEIRA"
       lucro_liquido:
-        codigos: ["3.11", "3.09"]
+        # 3.09 foi REMOVIDO da lista em 13/09/2026. No arquivo real da CVM ele
+        # e "Resultado Antes dos Tributos sobre o Lucro" -- que contem a
+        # palavra "Lucro" e portanto casava com o padrao abaixo. Bastava a
+        # companhia nao publicar 3.11 para o sistema entregar lucro ANTES de
+        # imposto como lucro liquido, calado. Na BBSE3 seriam R$ 470 milhoes
+        # a mais num trimestre, 16%.
+        #
+        # Resultado antes de imposto nao e aproximacao de lucro liquido: e
+        # outro numero. Sem 3.11, o certo e FALTANDO.
+        codigos: ["3.11"]
         demonstrativo: DRE
         padrao_ds_conta: "LUCRO|PREJUIZO"
       fco:
@@ -190,38 +218,115 @@ planos:
       Seguradoras, resseguradoras, previdencia e capitalizacao. Receita e
       premio ganho; nao ha custo de produto vendido nem margem bruta
       comparavel a industria.
+    #
+    # CONFRONTADO com arquivo real em 13/09/2026: BBSE3 (BB Seguridade
+    # Participacoes, CNPJ 17.344.597/0001-94), ITR CON 2026T2, 214 contas
+    # lidas de itr_cia_aberta_{BPA,BPP,DRE,DRA}_con_2026.csv.
+    #
+    # A DRE de seguradora NAO e a industrial renumerada. A diferenca que mais
+    # importa esta no fim da demonstracao:
+    #
+    #   3.09  Resultado Antes dos Tributos sobre o Lucro
+    #   3.10  Imposto de Renda e Contribuicao Social sobre o Lucro
+    #   3.11  Resultado Liquido das Operacoes Continuadas
+    #   3.12  Resultado Liquido de Operacoes Descontinuadas
+    #   3.13  Lucro/Prejuizo Consolidado do Periodo      <- o resultado final
+    #
+    # No plano industrial o resultado final e 3.11. Aqui 3.11 e apenas a parte
+    # continuada, e o total e 3.13. Usar 3.11 numa seguradora com operacao
+    # descontinuada daria um lucro errado, sem nenhum sinal na tela.
     contas:
       ativo_total:
         codigos: ["1"]
         demonstrativo: BPA
         padrao_ds_conta: "ATIVO TOTAL"
+      ativo_circulante:
+        codigos: ["1.01"]
+        demonstrativo: BPA
+        padrao_ds_conta: "ATIVO CIRCULANTE"
+      caixa_equivalentes:
+        codigos: ["1.01.01"]
+        demonstrativo: BPA
+        padrao_ds_conta: "CAIXA E EQUIVALENTES"
+      aplicacoes_financeiras_ca:
+        codigos: ["1.01.02"]
+        demonstrativo: BPA
+        padrao_ds_conta: "APLICACOES FINANCEIRAS"
       passivo_total:
         codigos: ["2"]
         demonstrativo: BPP
         padrao_ds_conta: "PASSIVO TOTAL"
+      passivo_circulante:
+        codigos: ["2.01"]
+        demonstrativo: BPP
+        padrao_ds_conta: "PASSIVO CIRCULANTE"
+      passivo_nao_circulante:
+        codigos: ["2.02"]
+        demonstrativo: BPP
+        padrao_ds_conta: "PASSIVO NAO CIRCULANTE"
       patrimonio_liquido:
         codigos: ["2.03"]
         demonstrativo: BPP
         padrao_ds_conta: "PATRIMONIO LIQUIDO"
-      lucro_liquido:
-        codigos: ["3.11", "3.09"]
+      receita_seguros:
+        # 3.01 "Receitas das Atividades Seguradoras/Resseguradoras". Numa
+        # HOLDING como a BBSE3 essa conta vem zerada e o resultado chega por
+        # equivalencia patrimonial (3.06) -- zero aqui e o numero do arquivo,
+        # nao dado faltando.
+        codigos: ["3.01"]
         demonstrativo: DRE
-        padrao_ds_conta: "LUCRO|PREJUIZO"
+        padrao_ds_conta: "ATIVIDADES SEGURADORAS|RECEITAS COM SEGUROS"
+      despesa_seguros:
+        codigos: ["3.02"]
+        demonstrativo: DRE
+        padrao_ds_conta: "ATIVIDADE SEGURADORA|DESPESAS COM SERVICOS DE SEGUROS"
+      equivalencia_patrimonial:
+        codigos: ["3.06"]
+        demonstrativo: DRE
+        padrao_ds_conta: "EQUIVALENCIA PATRIMONIAL"
+      resultado_financeiro:
+        # 3.08, nao 3.06: no plano industrial o resultado financeiro e 3.06,
+        # que aqui e equivalencia patrimonial.
+        codigos: ["3.08"]
+        demonstrativo: DRE
+        padrao_ds_conta: "RESULTADO FINANCEIRO"
+      lucro_liquido:
+        codigos: ["3.13", "3.11"]
+        demonstrativo: DRE
+        padrao_ds_conta: "LUCRO|PREJUIZO|RESULTADO LIQUIDO"
       fco:
+        # NAO confrontado: a BBSE3 nao entregou DFC_MI no ITR de 2026T2.
         codigos: ["6.01"]
         demonstrativo: DFC_MI
         padrao_ds_conta: "OPERACIONAIS"
     nao_se_aplica:
       - conceito: custo
         motivo: "Sinistralidade nao e custo de produto vendido."
+      - conceito: receita_liquida
+        motivo: >
+          Receita de seguradora e premio ganho (3.01), nao receita de venda de
+          bens e servicos. O conceito existe como `receita_seguros`, com outra
+          conta, para que uma serie nao misture as duas definicoes.
       - conceito: resultado_bruto
-        motivo: "Margem bruta nao existe no plano de seguradora."
+        motivo: >
+          A conta 3.03 "Resultado Bruto" EXISTE no plano de seguradora, mas
+          nao e margem bruta: e premio ganho menos sinistro e despesa de
+          comercializacao. Compara-la com margem bruta industrial seria
+          comparar coisas diferentes com o mesmo nome.
       - conceito: ebit
-        motivo: "Resultado financeiro de seguradora e parte da operacao."
+        motivo: >
+          A conta 3.07 "Resultado Antes do Resultado Financeiro e dos
+          Tributos" existe, mas para seguradora o resultado financeiro E parte
+          da operacao: a companhia investe a provisao tecnica enquanto o
+          sinistro nao ocorre. Excluir isso do operacional descreveria mal a
+          operacao.
       - conceito: depreciacao_amortizacao
         motivo: "EBITDA nao e definido para seguradora."
       - conceito: divida_bruta
-        motivo: "Provisoes tecnicas nao sao divida de estrutura de capital."
+        motivo: >
+          Confirmado no arquivo: em 2026T2 a conta 2.01.04 da BBSE3 e
+          "Capitalizacao", nao "Emprestimos e Financiamentos". Provisao
+          tecnica e obrigacao com segurado, nao divida de estrutura de capital.
 
   ENERGIA:
     descricao: >

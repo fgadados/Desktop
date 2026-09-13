@@ -8,6 +8,7 @@
     python run.py demo               # roda tudo com dados SINTETICOS, sem rede
     python run.py pagina             # gera empresas.html + empresas.csv
     python run.py contas BBSE3       # plano de contas REAL de uma empresa
+    python run.py identidade         # onde o balanco nao fecha, e por quanto
 
 Cada etapa e separada de proposito: a extracao depende de rede e e a unica
 parte nao reproduzivel offline. `transformar` roda inteiramente a partir dos
@@ -726,6 +727,66 @@ def contas(args) -> int:
     return 0
 
 
+def identidade(args) -> int:
+    """Lista onde o balanco NAO fecha, com residuo e linha de origem.
+
+    O resumo da transformacao diz quantas falharam. Dizer QUAIS, e por quanto,
+    e o que permite separar erro de leitura de divergencia da propria
+    companhia -- que sao coisas diferentes e pedem respostas diferentes.
+    """
+    import duckdb
+
+    from etl.config import DUCKDB_PATH
+
+    if not Path(DUCKDB_PATH).exists():
+        print(f"{DUCKDB_PATH} nao existe. Rode a transformacao antes.", file=sys.stderr)
+        return 1
+
+    con = duckdb.connect(str(DUCKDB_PATH), read_only=True)
+    resumo = con.execute(
+        "SELECT status, count(*) FROM teste_identidade GROUP BY 1 ORDER BY 1"
+    ).fetchall()
+    print("  ".join(f"{s}: {n}" for s, n in resumo) or "tabela vazia")
+
+    falhas = con.execute(
+        "SELECT t.cnpj, e.denom_social, e.plano_contas, t.base, t.periodo, "
+        "       t.ativo_total, t.passivo_total, t.patrimonio_liquido, "
+        "       t.residuo_principal, t.residuo_decomposto, t.tolerancia, "
+        "       t.src_ativo, t.src_passivo "
+        "FROM teste_identidade t LEFT JOIN empresa e ON e.cnpj = t.cnpj "
+        "WHERE t.status = 'FALHA' "
+        "ORDER BY abs(t.residuo_principal) / nullif(abs(t.ativo_total), 0) DESC "
+        "NULLS LAST"
+    ).fetchdf()
+    con.close()
+
+    if falhas.empty:
+        print("\nNenhuma falha de identidade.")
+        return 0
+
+    print(f"\n{len(falhas)} falha(s), da maior para a menor em termos relativos:\n")
+    for _, r in falhas.iterrows():
+        # O residuo relativo e opcional; o ABSOLUTO nunca some da tela. Ligar
+        # o `if` a linha inteira esconderia o numero justamente quando o ativo
+        # e zero, que e o caso mais suspeito de todos.
+        relativo = ""
+        if r["ativo_total"]:
+            relativo = f"   ({abs(r['residuo_principal']) / abs(r['ativo_total']):.2%} do ativo)"
+        print(f"{r['denom_social'] or r['cnpj']}  [{r['plano_contas']}]  "
+              f"{r['base']} {r['periodo']}")
+        print(f"    ativo 1          : {r['ativo_total']:>22,.2f}")
+        print(f"    passivo 2        : {r['passivo_total']:>22,.2f}")
+        print(f"    residuo 1-2      : {r['residuo_principal']:>22,.2f}{relativo}")
+        print(f"    residuo 2-(PC+PNC+PL): {r['residuo_decomposto']:>18,.2f}")
+        print(f"    tolerancia       : {r['tolerancia']:>22,.2f}")
+        print(f"    origem           : {r['src_ativo']} | {r['src_passivo']}\n")
+
+    print("Cole esta saida na conversa. Residuo relativo alto aponta leitura "
+          "errada; residuo de poucos reais aponta arredondamento da propria "
+          "companhia.")
+    return 0
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -734,6 +795,7 @@ def main() -> int:
     ct = sub.add_parser("contas")
     ct.add_argument("empresa", help="ticker (BBSE3) ou CNPJ")
     ct.set_defaults(fn=contas)
+    sub.add_parser("identidade").set_defaults(fn=identidade)
     pag = sub.add_parser("pagina")
     pag.add_argument("--banco", help="caminho do .duckdb (padrao: data/b3dss.duckdb)")
     pag.add_argument("--saida", help="arquivo HTML de saida (padrao: empresas.html)")
