@@ -9,6 +9,7 @@
     python run.py pagina             # gera empresas.html + empresas.csv
     python run.py contas BBSE3       # plano de contas REAL de uma empresa
     python run.py identidade         # onde o balanco nao fecha, e por quanto
+    python run.py bruto ITUB4        # o que a CVM entregou, antes das regras
 
 Cada etapa e separada de proposito: a extracao depende de rede e e a unica
 parte nao reproduzivel offline. `transformar` roda inteiramente a partir dos
@@ -829,6 +830,86 @@ def identidade(args) -> int:
     return 0
 
 
+def bruto(args) -> int:
+    """O que os Parquet CRUS tem para uma empresa, antes de qualquer regra.
+
+    Todo diagnostico ate aqui olha o banco, que e o DEPOIS. Quando um periodo
+    nao aparece na serie, isso nao distingue duas causas opostas:
+
+        o dado nao chegou da CVM           -> nao ha o que corrigir no codigo
+        o dado chegou e o pipeline perdeu  -> e defeito, e grave
+
+    Esta saida e o ANTES: uma linha por documento entregue, direto do arquivo,
+    sem passar por versao, ordem, periodo ou base.
+    """
+    from transform import depara
+
+    dfp = _ler("cvm/dfp_fatos.parquet")
+    itr = _ler("cvm/itr_fatos.parquet")
+    if dfp is None and itr is None:
+        print("nenhum bruto da CVM em data/parquet/. Rode a extracao antes.",
+              file=sys.stderr)
+        return 1
+    brutos = pd.concat([d for d in (dfp, itr) if d is not None], ignore_index=True)
+
+    alvo = args.empresa.upper().strip()
+    cnpj = re.sub(r"\D", "", alvo)
+    if not cnpj:
+        from etl.config import DUCKDB_PATH
+
+        if Path(DUCKDB_PATH).exists():
+            import duckdb
+
+            con = duckdb.connect(str(DUCKDB_PATH), read_only=True)
+            achado = con.execute(
+                "SELECT cnpj FROM depara_ticker WHERE ticker = ?", [alvo]
+            ).fetchone()
+            con.close()
+            cnpj = achado[0] if achado else ""
+    if not cnpj:
+        print(f"nao consegui resolver '{args.empresa}' para um CNPJ. "
+              "Passe o CNPJ, ou rode a transformacao para ter o de-para.",
+              file=sys.stderr)
+        return 1
+
+    brutos["_cnpj"] = depara.normalizar_cnpj(brutos["CNPJ_CIA"])
+    sel = brutos[brutos["_cnpj"] == cnpj]
+    if sel.empty:
+        print(f"CNPJ {cnpj} nao aparece em nenhum arquivo bruto da CVM baixado.",
+              file=sys.stderr)
+        return 1
+
+    denom = sel["DENOM_CIA"].dropna()
+    print(f"{denom.iloc[0] if not denom.empty else '(sem nome)'}  ({cnpj})")
+    print(f"{len(sel)} linha(s) nos Parquet crus, antes de qualquer regra.\n")
+
+    resumo = (
+        sel.groupby(["doc", "DT_REFER", "demonstrativo", "base", "ORDEM_EXERC"],
+                    dropna=False)
+        .agg(linhas=("CD_CONTA", "size"), versoes=("VERSAO", lambda s: sorted(set(s))),
+             arquivo=("src_file", "first"))
+        .reset_index()
+        .sort_values(["DT_REFER", "doc", "demonstrativo", "ORDEM_EXERC"])
+    )
+    if args.demonstrativo:
+        resumo = resumo[resumo["demonstrativo"] == args.demonstrativo.upper()]
+        if resumo.empty:
+            print(f"nada de '{args.demonstrativo}' para esta empresa.", file=sys.stderr)
+            return 1
+
+    print(f"  {'DT_REFER':<12s} {'doc':<4s} {'demonst':<8s} {'base':<4s} "
+          f"{'ordem':<10s} {'linhas':>6s}  versoes  arquivo")
+    for _, r in resumo.iterrows():
+        print(f"  {str(r['DT_REFER']):<12s} {r['doc']:<4s} {r['demonstrativo']:<8s} "
+              f"{r['base']:<4s} {str(r['ORDEM_EXERC'])[:10]:<10s} "
+              f"{r['linhas']:>6d}  {','.join(map(str, r['versoes'])):<7s}  {r['arquivo']}")
+
+    print("\nDocumento que NAO aparece aqui nao foi entregue pela CVM (ou nao "
+          "foi baixado). Se ele aparece aqui e some da serie, e o pipeline "
+          "que perdeu -- e isso e defeito.")
+    return 0
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -840,6 +921,10 @@ def main() -> int:
                     help="lista os periodos com balanco, em vez das contas")
     ct.set_defaults(fn=contas)
     sub.add_parser("identidade").set_defaults(fn=identidade)
+    br = sub.add_parser("bruto")
+    br.add_argument("empresa", help="ticker (ITUB4) ou CNPJ")
+    br.add_argument("--demonstrativo", help="filtra por BPA, BPP, DRE, DFC_MI...")
+    br.set_defaults(fn=bruto)
     pag = sub.add_parser("pagina")
     pag.add_argument("--banco", help="caminho do .duckdb (padrao: data/b3dss.duckdb)")
     pag.add_argument("--saida", help="arquivo HTML de saida (padrao: empresas.html)")
