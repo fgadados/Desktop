@@ -1,0 +1,29 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.DS_Store
+
+# Artefatos gerados por `pip install -e .`. Sao locais de cada maquina: se
+# entrarem no repositorio, o `git pull` de quem ja instalou aborta porque
+# sobrescreveria arquivos nao rastreados.
+*.egg-info/
+build/
+dist/
+
+# Log de execucao do comecar.sh, gerado a cada rodada.
+b3dss-log.txt
+
+# Saida do `run.py pagina`: gerada a partir do banco, nao versionada.
+empresas.html
+empresas.csv
+
+# Dados: brutos, derivados e banco. Nada disso entra no repositorio.
+data/raw/
+data/parquet/
+data/warehouse/
+data/*.duckdb
+data/*.duckdb.wal
+
+# Excecao: entradas mantidas a mao pelo usuario sao versionadas.
+!data/manual/

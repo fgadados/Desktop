@@ -1,0 +1,1 @@
+"""Schema DuckDB e carga."""

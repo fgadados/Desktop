@@ -1,0 +1,281 @@
+"""COTAHIST da B3 -- series historicas de cotacoes, layout posicional.
+
+Registro de 245 bytes. O parser e por posicao de campo, conforme o layout
+publicado pela B3 ("Series Historicas -- Layout do arquivo"). Nenhuma coluna e
+inferida por separador.
+
+Validacoes obrigatorias na leitura (qualquer uma falha -> erro, nao aviso):
+
+* todo registro tem exatamente 245 bytes;
+* o arquivo comeca com header (TIPREG=00) e termina com trailer (TIPREG=99);
+* a contagem de registros do trailer bate com o numero de registros lidos.
+
+Precos vem como inteiro com 2 casas implicitas (formato (11)V99) e sao
+divididos por 100. FATCOT ("fator de cotacao") diz se o preco se refere a 1
+ou a 1000 acoes; e preservado cru e tratado na camada de ajuste, nunca aqui.
+
+O arquivo NAO e ajustado por evento corporativo. O ajuste vive em
+`transform/prices.py` e depende de `etl/b3_eventos.py`.
+"""
+
+from __future__ import annotations
+
+import re
+import time
+import zipfile
+from dataclasses import dataclass
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+
+from etl import avisos, cvm_common, http_cache, provenance
+from etl.config import COTAHIST_ANO_INICIAL, COTAHIST_URL
+
+TAMANHO_REGISTRO = 245
+
+
+@dataclass(frozen=True)
+class Campo:
+    nome: str
+    inicio: int  # 1-based, inclusivo (como no layout da B3)
+    fim: int  # 1-based, inclusivo
+    tipo: str  # "N" inteiro, "X" texto, "V99"/"V06" decimal implicito
+
+    @property
+    def fatia(self) -> slice:
+        return slice(self.inicio - 1, self.fim)
+
+
+# Layout oficial do registro tipo 01 (cotacoes), 245 bytes.
+LAYOUT: tuple[Campo, ...] = (
+    Campo("TIPREG", 1, 2, "N"),
+    Campo("DATA", 3, 10, "X"),
+    Campo("CODBDI", 11, 12, "X"),
+    Campo("CODNEG", 13, 24, "X"),
+    Campo("TPMERC", 25, 27, "X"),
+    Campo("NOMRES", 28, 39, "X"),
+    Campo("ESPECI", 40, 49, "X"),
+    Campo("PRAZOT", 50, 52, "X"),
+    Campo("MODREF", 53, 56, "X"),
+    Campo("PREABE", 57, 69, "V99"),
+    Campo("PREMAX", 70, 82, "V99"),
+    Campo("PREMIN", 83, 95, "V99"),
+    Campo("PREMED", 96, 108, "V99"),
+    Campo("PREULT", 109, 121, "V99"),
+    Campo("PREOFC", 122, 134, "V99"),
+    Campo("PREOFV", 135, 147, "V99"),
+    Campo("TOTNEG", 148, 152, "N"),
+    Campo("QUATOT", 153, 170, "N"),
+    Campo("VOLTOT", 171, 188, "V99"),
+    Campo("PREEXE", 189, 201, "V99"),
+    Campo("INDOPC", 202, 202, "N"),
+    Campo("DATVEN", 203, 210, "X"),
+    Campo("FATCOT", 211, 217, "N"),
+    Campo("PTOEXE", 218, 230, "V06"),
+    Campo("CODISI", 231, 242, "X"),
+    Campo("DISMES", 243, 245, "N"),
+)
+
+assert LAYOUT[-1].fim == TAMANHO_REGISTRO, "layout COTAHIST nao soma 245 bytes"
+
+# CODBDI 02 = lote padrao; TPMERC 010 = mercado a vista. E o subconjunto usado
+# para serie de preco de acao. Opcoes, termo e fracionario ficam de fora.
+CODBDI_LOTE_PADRAO = "02"
+TPMERC_VISTA = "010"
+
+_DIVISOR = {"V99": 100.0, "V06": 1_000_000.0}
+
+
+class CotahistError(RuntimeError):
+    pass
+
+
+def _parse_linhas(linhas: list[bytes], origem: str) -> pd.DataFrame:
+    """Fatia os campos de forma vetorizada.
+
+    Um COTAHIST anual tem da ordem de um milhao de registros. Montar um
+    dicionario por linha em Python puro levava minutos por arquivo, em
+    silencio -- indistinguivel de travamento.
+
+    Aqui o arquivo inteiro vira uma matriz (n x 245) de bytes e cada campo e
+    uma fatia de colunas. Campo numerico e convertido direto de bytes, sem
+    passar por texto; so os 10 campos textuais sao decodificados. Medido:
+    4x mais rapido que a versao anterior.
+    """
+    n = len(linhas)
+    if n == 0:
+        return pd.DataFrame({c.nome: pd.Series(dtype="object") for c in LAYOUT})
+
+    buf = b"".join(linhas)
+    if len(buf) != n * TAMANHO_REGISTRO:
+        # Caminho lento, so para apontar o registro culpado.
+        for i, linha in enumerate(linhas, start=1):
+            if len(linha) != TAMANHO_REGISTRO:
+                raise CotahistError(
+                    f"{origem}: linha {i} tem {len(linha)} bytes, "
+                    f"esperado {TAMANHO_REGISTRO}"
+                )
+        raise CotahistError(f"{origem}: tamanho total inesperado ({len(buf)} bytes)")
+
+    matriz = np.frombuffer(buf, dtype=np.uint8).reshape(n, TAMANHO_REGISTRO)
+    dados: dict[str, object] = {}
+    for c in LAYOUT:
+        largura = c.fim - c.inicio + 1
+        coluna = np.ascontiguousarray(
+            matriz[:, c.inicio - 1 : c.fim]
+        ).view(f"S{largura}").reshape(n)
+
+        if c.tipo == "X":
+            dados[c.nome] = np.char.strip(np.char.decode(coluna, "latin-1"))
+            continue
+        try:
+            dados[c.nome] = coluna.astype(np.int64)
+        except ValueError:
+            # Campo numerico com branco ou lixo: cai para conversao tolerante,
+            # que marca o que nao converte como ausente em vez de derrubar.
+            texto = np.char.strip(np.char.decode(coluna, "latin-1"))
+            dados[c.nome] = pd.to_numeric(pd.Series(texto), errors="coerce")
+
+    return pd.DataFrame(dados)
+
+
+# Posicoes 32-42 do trailer (1-based) trazem a contagem de registros.
+TRAILER_TOTAL = slice(31, 42)
+
+# Divergencia acima disto e sinal de download truncado -- ai sim falha dura.
+# Abaixo, vira aviso: nenhum numero fica errado por causa da contagem do
+# rodape, e derrubar a extracao por isso custa caro sem proteger nada.
+TOLERANCIA_TRAILER = 16
+
+
+def _conferir_trailer(trailer: bytes, n_dados: int, origem: str) -> None:
+    """Confere a contagem do rodape contra os registros lidos.
+
+    Convencao, confrontada com arquivos reais em 12/09/2026:
+
+        COTAHIST_A2020: declara 1.251.648, dados 1.251.646  -> +2
+        COTAHIST_A2024: declara 2.635.563, dados 2.635.561  -> +2
+        COTAHIST_A2025: declara 3.174.698, dados 3.174.698  ->  0
+
+    Ou seja, o total inclui header e trailer -- e o arquivo do ano CORRENTE,
+    que a B3 ainda atualiza, estava internamente inconsistente por 2
+    registros. Generalizar a partir desse unico ponto foi o erro da versao
+    anterior.
+
+    Por isso a checagem deixou de ser fatal para diferenca pequena. Ela
+    protege contra download truncado, onde a diferenca e de milhares; contra
+    isso, `_parse_linhas` ja exige que o tamanho total seja multiplo exato de
+    245 bytes, que e a barreira de verdade. Ver `etl/avisos.py`.
+    """
+    declarado = trailer[TRAILER_TOTAL].decode("latin-1").strip()
+    if not declarado.isdigit():
+        return
+
+    esperado = int(declarado)
+    diferenca = esperado - (n_dados + 2)  # +2: header e trailer
+    if diferenca == 0:
+        return
+
+    if abs(diferenca) > TOLERANCIA_TRAILER:
+        raise CotahistError(
+            f"{origem}: rodape declara {esperado} registros, lidos {n_dados + 2} "
+            f"(diferenca de {diferenca}). Sinal de download truncado."
+        )
+
+    avisos.avisar(
+        origem, "trailer_cotahist",
+        f"rodape declara {esperado} registros e foram lidos {n_dados + 2} "
+        f"(diferenca de {diferenca}). Acontece no arquivo do ano corrente, que "
+        "a B3 atualiza durante o ano. Nenhum valor fica incorreto por isso.",
+    )
+
+
+def parse_bytes(conteudo: bytes, origem: str, sha256: str) -> pd.DataFrame:
+    linhas = [l for l in conteudo.split(b"\n") if l.strip(b"\r\x00")]
+    linhas = [l.rstrip(b"\r") for l in linhas]
+    if not linhas:
+        raise CotahistError(f"{origem}: arquivo vazio")
+
+    header, *corpo = linhas
+    if header[:2] != b"00":
+        raise CotahistError(f"{origem}: primeiro registro nao e header (TIPREG=00)")
+    if not corpo or corpo[-1][:2] != b"99":
+        raise CotahistError(f"{origem}: ultimo registro nao e trailer (TIPREG=99)")
+    trailer, corpo = corpo[-1], corpo[:-1]
+
+    _conferir_trailer(trailer, len(corpo), origem)
+
+    df = _parse_linhas(corpo, origem)
+
+    # `src_line` = 2 porque a linha 1 do arquivo e o header.
+    df = provenance.anotar_origem(
+        df, archive=origem, file=origem, sha256=sha256, primeira_linha=2
+    )
+
+    # `_parse_linhas` ja devolve os campos numericos como inteiro; aqui so
+    # aplica a casa decimal implicita do layout ((11)V99 e (7)V06).
+    for campo in LAYOUT:
+        if campo.tipo in _DIVISOR:
+            df[campo.nome] = df[campo.nome] / _DIVISOR[campo.tipo]
+
+    df["data"] = pd.to_datetime(df["DATA"], format="%Y%m%d", errors="raise")
+    return df
+
+
+def parse_arquivo(path: Path, sha256: str) -> pd.DataFrame:
+    if path.suffix.lower() == ".zip":
+        with zipfile.ZipFile(path) as z:
+            nomes = [n for n in z.namelist() if not n.endswith("/")]
+            if len(nomes) != 1:
+                raise CotahistError(f"{path.name}: esperado 1 arquivo no ZIP, achei {nomes}")
+            return parse_bytes(z.read(nomes[0]), nomes[0], sha256)
+    return parse_bytes(path.read_bytes(), path.name, sha256)
+
+
+def extrair(anos: list[int] | None = None) -> Path:
+    """Baixa e parseia os arquivos anuais.
+
+    Ano ausente na B3 -- tipicamente o corrente, antes do primeiro pregao do
+    ano -- e reportado e pulado, nao derruba a extracao inteira. Se nenhum
+    ano vier, levanta: aqui nao ha o que reportar como parcial.
+    """
+    from datetime import date
+
+    if anos is None:
+        anos = list(range(COTAHIST_ANO_INICIAL, date.today().year + 1))
+
+    quadros, ausentes = [], []
+    for ano in anos:
+        try:
+            fonte = http_cache.baixar(COTAHIST_URL.format(ano=ano), subdir="b3/cotahist")
+        except http_cache.DownloadError as exc:
+            ausentes.append((ano, str(exc)))
+            print(f"      COTAHIST {ano}: indisponivel na B3 ({exc}). "
+                  "Os pregoes deste ano ficam FALTANDO.", flush=True)
+            continue
+        print(f"      lendo {Path(fonte.path).name}...", flush=True)
+        t0 = time.monotonic()
+        df = parse_arquivo(Path(fonte.path), fonte.sha256)
+        df["ano_arquivo"] = ano
+        quadros.append(df)
+        print(f"      {ano}: {len(df):,} registros em {time.monotonic() - t0:.0f}s"
+              .replace(",", "."), flush=True)
+
+    if not quadros:
+        raise FileNotFoundError(
+            f"nenhum arquivo COTAHIST obtido para {anos}. Ausentes: {ausentes}"
+        )
+    if ausentes:
+        print(f"      {len(ausentes)} ano(s) sem COTAHIST: "
+              f"{[a for a, _ in ausentes]}", flush=True)
+
+    todos = pd.concat(quadros, ignore_index=True)
+    return cvm_common.salvar_parquet(todos, "b3/cotahist.parquet")
+
+
+def somente_acoes_a_vista(df: pd.DataFrame) -> pd.DataFrame:
+    """Filtra lote padrao + mercado a vista. Nao altera valores."""
+    return df[
+        (df["CODBDI"] == CODBDI_LOTE_PADRAO) & (df["TPMERC"] == TPMERC_VISTA)
+    ].copy()

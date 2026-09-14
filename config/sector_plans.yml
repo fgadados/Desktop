@@ -1,0 +1,414 @@
+# Regra 6 -- plano de contas setorial.
+#
+# Bancos e seguradoras nao seguem o plano de contas industrial. "Receita
+# liquida", "custo dos produtos vendidos" e "margem bruta" nao existem no
+# plano financeiro, e EBIT/EBITDA nao tem significado para uma instituicao
+# cuja operacao E a intermediacao financeira. Forcar um numero ali produz
+# comparacao invalida.
+#
+# Como este arquivo e lido
+# ------------------------
+# Cada plano mapeia um CONCEITO (nome interno, estavel) para uma lista de
+# CODIGOS CANDIDATOS da CVM, em ordem de preferencia. O resolvedor
+# (transform/sector.py) procura o primeiro candidato presente nos dados da
+# empresa naquele periodo. Se nenhum estiver presente, o conceito fica
+# FALTANDO -- nunca substituido por aproximacao.
+#
+# `padrao_ds_conta` e uma checagem de sanidade: se o codigo existir mas a
+# descricao da conta no arquivo nao casar com o padrao, o resolvedor sinaliza
+# divergencia de layout em vez de aceitar o numero calado.
+#
+# `nao_se_aplica` lista os conceitos que nao existem naquele plano. Indicador
+# que depende deles aparece na interface como NAO_SE_APLICA, com o motivo.
+#
+# O que ja foi confrontado com arquivo real
+# -----------------------------------------
+#   SEGURADORA  confrontado em 13/09/2026 contra BBSE3, ITR CON 2026T2
+#               (214 contas). Ver o comentario do proprio plano.
+#   INDUSTRIAL  parcial: BPA/BPP/DRE conferidos indiretamente, via as empresas
+#               industriais da carteira que fecham a identidade contabil.
+#   FINANCEIRO  confrontado em 13/09/2026 contra ITUB4, ITR CON 2026T2
+#               (148 contas). Ver o comentario do proprio plano.
+#   ENERGIA     herda INDUSTRIAL.
+#
+# `python run.py contas TICKER` imprime o plano real de uma empresa, com
+# arquivo e linha de cada conta. E assim que este arquivo deve ser atualizado
+# -- nunca de memoria.
+
+deteccao:
+  # Aplicado sobre CAD_CIA.SETOR_ATIV, sem acento e em caixa alta. A primeira
+  # regra que casar vence.
+  #
+  # A ultima regra e `.*`: quem nao casa com nada vira INDUSTRIAL, que e o
+  # plano padronizado da CVM para companhia nao-financeira. A tela mostra o
+  # criterio literal ("casou com /.*/"), entao da para distinguir um setor
+  # reconhecido de um que so caiu no padrao.
+  #
+  # Os radicais abaixo sao STEMS de proposito, nao palavras inteiras. O
+  # SETOR_ATIV da CVM mistura singular, plural e a forma de holding:
+  # "Emp. Adm. Part. - Seguradoras e Corretoras" nao contem "SEGURO", e com
+  # o padrao antigo BBSE3 (BB Seguridade) era classificada como INDUSTRIAL.
+  # O sintoma nao era erro: era indicador FALTANDO em cascata, porque o plano
+  # industrial procurava emprestimo na conta 2.01.04 e achava "Capitalizacao".
+  - plano: FINANCEIRO
+    padrao: "BANCO|INTERMEDIACAO FINANCEIRA|CREDITO|ARRENDAMENTO MERCANTIL|SECURITIZA"
+  - plano: SEGURADORA
+    padrao: "SEGURADOR|SEGURO|SEGURIDADE|RESSEGUR|PREVIDENCIA|CAPITALIZACAO"
+  - plano: ENERGIA
+    padrao: "ENERGIA ELETRICA|GERACAO|TRANSMISSAO|DISTRIBUICAO DE ENERGIA"
+  - plano: INDUSTRIAL
+    padrao: ".*"
+
+planos:
+  INDUSTRIAL:
+    descricao: "Plano de contas padronizado da CVM para companhias nao-financeiras."
+    contas:
+      ativo_total:
+        codigos: ["1"]
+        demonstrativo: BPA
+        padrao_ds_conta: "ATIVO TOTAL"
+      ativo_circulante:
+        codigos: ["1.01"]
+        demonstrativo: BPA
+        padrao_ds_conta: "ATIVO CIRCULANTE"
+      caixa_equivalentes:
+        codigos: ["1.01.01"]
+        demonstrativo: BPA
+        padrao_ds_conta: "CAIXA E EQUIVALENTES"
+      aplicacoes_financeiras_ca:
+        codigos: ["1.01.02"]
+        demonstrativo: BPA
+        padrao_ds_conta: "APLICACOES FINANCEIRAS"
+      passivo_total:
+        codigos: ["2"]
+        demonstrativo: BPP
+        padrao_ds_conta: "PASSIVO TOTAL"
+      passivo_circulante:
+        codigos: ["2.01"]
+        demonstrativo: BPP
+        padrao_ds_conta: "PASSIVO CIRCULANTE"
+      divida_curto_prazo:
+        codigos: ["2.01.04"]
+        demonstrativo: BPP
+        padrao_ds_conta: "EMPRESTIMOS E FINANCIAMENTOS"
+      passivo_nao_circulante:
+        codigos: ["2.02"]
+        demonstrativo: BPP
+        padrao_ds_conta: "PASSIVO NAO CIRCULANTE"
+      divida_longo_prazo:
+        codigos: ["2.02.01"]
+        demonstrativo: BPP
+        padrao_ds_conta: "EMPRESTIMOS E FINANCIAMENTOS"
+      patrimonio_liquido:
+        codigos: ["2.03"]
+        demonstrativo: BPP
+        padrao_ds_conta: "PATRIMONIO LIQUIDO"
+      receita_liquida:
+        codigos: ["3.01"]
+        demonstrativo: DRE
+        padrao_ds_conta: "RECEITA"
+      custo:
+        codigos: ["3.02"]
+        demonstrativo: DRE
+        padrao_ds_conta: "CUSTO"
+      resultado_bruto:
+        codigos: ["3.03"]
+        demonstrativo: DRE
+        padrao_ds_conta: "RESULTADO BRUTO"
+      ebit:
+        codigos: ["3.05"]
+        demonstrativo: DRE
+        padrao_ds_conta: "ANTES DO RESULTADO FINANCEIRO"
+      resultado_financeiro:
+        codigos: ["3.06"]
+        demonstrativo: DRE
+        padrao_ds_conta: "RESULTADO FINANCEIRO"
+      lucro_liquido:
+        # 3.09 foi REMOVIDO da lista em 13/09/2026. No arquivo real da CVM ele
+        # e "Resultado Antes dos Tributos sobre o Lucro" -- que contem a
+        # palavra "Lucro" e portanto casava com o padrao abaixo. Bastava a
+        # companhia nao publicar 3.11 para o sistema entregar lucro ANTES de
+        # imposto como lucro liquido, calado. Na BBSE3 seriam R$ 470 milhoes
+        # a mais num trimestre, 16%.
+        #
+        # Resultado antes de imposto nao e aproximacao de lucro liquido: e
+        # outro numero. Sem 3.11, o certo e FALTANDO.
+        codigos: ["3.11"]
+        demonstrativo: DRE
+        padrao_ds_conta: "LUCRO|PREJUIZO"
+      fco:
+        codigos: ["6.01"]
+        demonstrativo: DFC_MI
+        padrao_ds_conta: "OPERACIONAIS"
+      fci:
+        codigos: ["6.02"]
+        demonstrativo: DFC_MI
+        padrao_ds_conta: "INVESTIMENTO"
+      depreciacao_amortizacao:
+        # Nao ha codigo padronizado: a D&A aparece como ajuste dentro do 6.01
+        # do metodo indireto, com codigo livre por companhia. O resolvedor
+        # procura por descricao dentro do subgrupo 6.01.*, e quando nao acha,
+        # EBITDA fica FALTANDO (decisao do usuario: EBITDA e obrigatorio).
+        codigos: []
+        demonstrativo: DFC_MI
+        prefixo_busca: "6.01"
+        busca_por_descricao: "DEPRECIACAO|AMORTIZACAO|DEPRECIACAO E AMORTIZACAO|EXAUSTAO"
+    nao_se_aplica: []
+
+  FINANCEIRO:
+    descricao: >
+      Bancos e demais instituicoes financeiras. A DRE e organizada por
+      intermediacao financeira, nao por receita/custo/margem. Multiplo de
+      valor de firma nao se aplica: divida e insumo da operacao, nao
+      estrutura de capital.
+    contas:
+      ativo_total:
+        codigos: ["1"]
+        demonstrativo: BPA
+        padrao_ds_conta: "ATIVO TOTAL"
+      caixa_equivalentes:
+        # 1.01 no banco. No plano industrial 1.01 e "Ativo Circulante" e o
+        # caixa e 1.01.01 -- banco nao tem a divisao circulante.
+        codigos: ["1.01"]
+        demonstrativo: BPA
+        padrao_ds_conta: "CAIXA E EQUIVALENTES"
+      ativos_financeiros:
+        codigos: ["1.02"]
+        demonstrativo: BPA
+        padrao_ds_conta: "ATIVOS FINANCEIROS"
+      operacoes_credito:
+        codigos: ["1.02.03.05"]
+        demonstrativo: BPA
+        padrao_ds_conta: "OPERACOES DE CREDITO"
+      passivo_total:
+        codigos: ["2"]
+        demonstrativo: BPP
+        padrao_ds_conta: "PASSIVO TOTAL"
+      patrimonio_liquido:
+        # 2.08, nao 2.03. Num banco 2.03 e "Passivos Financeiros ao Custo
+        # Amortizado" -- no ITUB4 de 2026T2, R$ 2,4 TRILHOES de captacao.
+        # Ler isso como patrimonio liquido nao e numero faltando, e numero
+        # errado: o PL de verdade e R$ 228 bilhoes.
+        codigos: ["2.08"]
+        demonstrativo: BPP
+        padrao_ds_conta: "PATRIMONIO LIQUIDO"
+      depositos:
+        codigos: ["2.03.01"]
+        demonstrativo: BPP
+        padrao_ds_conta: "DEPOSITOS"
+      receita_intermediacao:
+        codigos: ["3.01"]
+        demonstrativo: DRE
+        padrao_ds_conta: "INTERMEDIACAO FINANCEIRA"
+      despesa_intermediacao:
+        codigos: ["3.02"]
+        demonstrativo: DRE
+        padrao_ds_conta: "INTERMEDIACAO FINANCEIRA"
+      resultado_intermediacao:
+        codigos: ["3.03"]
+        demonstrativo: DRE
+        padrao_ds_conta: "INTERMEDIACAO FINANCEIRA"
+      lucro_liquido:
+        # 3.09, e o codigo NAO significa a mesma coisa nos tres planos:
+        #
+        #   banco       3.09  Lucro/Prejuizo Consolidado do Periodo  <- este
+        #   seguradora  3.09  Resultado Antes dos Tributos sobre o Lucro
+        #   industrial  3.11  Lucro/Prejuizo Consolidado do Periodo
+        #
+        # Por isso 3.09 saiu da lista dos outros dois planos e entra aqui
+        # sozinho: e a regra 6 existindo por um motivo concreto. O
+        # `padrao_ds_conta` e a defesa se a CVM renumerar.
+        codigos: ["3.09"]
+        demonstrativo: DRE
+        padrao_ds_conta: "LUCRO|PREJUIZO"
+      fco:
+        codigos: ["6.01"]
+        demonstrativo: DFC_MI
+        padrao_ds_conta: "OPERACIONAIS"
+    nao_se_aplica:
+      - conceito: receita_liquida
+        motivo: "Plano financeiro nao tem receita liquida de bens e servicos."
+      - conceito: custo
+        motivo: "Plano financeiro nao tem custo dos produtos vendidos."
+      - conceito: resultado_bruto
+        motivo: "Margem bruta nao existe no plano financeiro."
+      - conceito: ebit
+        motivo: >
+          EBIT pressupoe separar resultado operacional de resultado
+          financeiro. Para um banco o resultado financeiro E o operacional.
+      - conceito: depreciacao_amortizacao
+        motivo: "EBITDA nao e definido para instituicao financeira."
+      - conceito: divida_bruta
+        motivo: >
+          Captacao de banco e materia-prima da operacao, nao divida de
+          estrutura de capital. Divida liquida e EV nao se aplicam.
+
+  SEGURADORA:
+    descricao: >
+      Seguradoras, resseguradoras, previdencia e capitalizacao. Receita e
+      premio ganho; nao ha custo de produto vendido nem margem bruta
+      comparavel a industria.
+    #
+    # CONFRONTADO com arquivo real em 13/09/2026: BBSE3 (BB Seguridade
+    # Participacoes, CNPJ 17.344.597/0001-94), ITR CON 2026T2, 214 contas
+    # lidas de itr_cia_aberta_{BPA,BPP,DRE,DRA}_con_2026.csv.
+    #
+    # A DRE de seguradora NAO e a industrial renumerada. A diferenca que mais
+    # importa esta no fim da demonstracao:
+    #
+    #   3.09  Resultado Antes dos Tributos sobre o Lucro
+    #   3.10  Imposto de Renda e Contribuicao Social sobre o Lucro
+    #   3.11  Resultado Liquido das Operacoes Continuadas
+    #   3.12  Resultado Liquido de Operacoes Descontinuadas
+    #   3.13  Lucro/Prejuizo Consolidado do Periodo      <- o resultado final
+    #
+    # No plano industrial o resultado final e 3.11. Aqui 3.11 e apenas a parte
+    # continuada, e o total e 3.13. Usar 3.11 numa seguradora com operacao
+    # descontinuada daria um lucro errado, sem nenhum sinal na tela.
+    contas:
+      ativo_total:
+        codigos: ["1"]
+        demonstrativo: BPA
+        padrao_ds_conta: "ATIVO TOTAL"
+      ativo_circulante:
+        codigos: ["1.01"]
+        demonstrativo: BPA
+        padrao_ds_conta: "ATIVO CIRCULANTE"
+      caixa_equivalentes:
+        codigos: ["1.01.01"]
+        demonstrativo: BPA
+        padrao_ds_conta: "CAIXA E EQUIVALENTES"
+      aplicacoes_financeiras_ca:
+        codigos: ["1.01.02"]
+        demonstrativo: BPA
+        padrao_ds_conta: "APLICACOES FINANCEIRAS"
+      passivo_total:
+        codigos: ["2"]
+        demonstrativo: BPP
+        padrao_ds_conta: "PASSIVO TOTAL"
+      passivo_circulante:
+        codigos: ["2.01"]
+        demonstrativo: BPP
+        padrao_ds_conta: "PASSIVO CIRCULANTE"
+      passivo_nao_circulante:
+        codigos: ["2.02"]
+        demonstrativo: BPP
+        padrao_ds_conta: "PASSIVO NAO CIRCULANTE"
+      patrimonio_liquido:
+        codigos: ["2.03"]
+        demonstrativo: BPP
+        padrao_ds_conta: "PATRIMONIO LIQUIDO"
+      receita_seguros:
+        # 3.01 "Receitas das Atividades Seguradoras/Resseguradoras". Numa
+        # HOLDING como a BBSE3 essa conta vem zerada e o resultado chega por
+        # equivalencia patrimonial (3.06) -- zero aqui e o numero do arquivo,
+        # nao dado faltando.
+        codigos: ["3.01"]
+        demonstrativo: DRE
+        padrao_ds_conta: "ATIVIDADES SEGURADORAS|RECEITAS COM SEGUROS"
+      despesa_seguros:
+        codigos: ["3.02"]
+        demonstrativo: DRE
+        padrao_ds_conta: "ATIVIDADE SEGURADORA|DESPESAS COM SERVICOS DE SEGUROS"
+      equivalencia_patrimonial:
+        codigos: ["3.06"]
+        demonstrativo: DRE
+        padrao_ds_conta: "EQUIVALENCIA PATRIMONIAL"
+      resultado_financeiro:
+        # 3.08, nao 3.06: no plano industrial o resultado financeiro e 3.06,
+        # que aqui e equivalencia patrimonial.
+        codigos: ["3.08"]
+        demonstrativo: DRE
+        padrao_ds_conta: "RESULTADO FINANCEIRO"
+      lucro_liquido:
+        codigos: ["3.13", "3.11"]
+        demonstrativo: DRE
+        padrao_ds_conta: "LUCRO|PREJUIZO|RESULTADO LIQUIDO"
+      fco:
+        # NAO confrontado: a BBSE3 nao entregou DFC_MI no ITR de 2026T2.
+        codigos: ["6.01"]
+        demonstrativo: DFC_MI
+        padrao_ds_conta: "OPERACIONAIS"
+    nao_se_aplica:
+      - conceito: custo
+        motivo: "Sinistralidade nao e custo de produto vendido."
+      - conceito: receita_liquida
+        motivo: >
+          Receita de seguradora e premio ganho (3.01), nao receita de venda de
+          bens e servicos. O conceito existe como `receita_seguros`, com outra
+          conta, para que uma serie nao misture as duas definicoes.
+      - conceito: resultado_bruto
+        motivo: >
+          A conta 3.03 "Resultado Bruto" EXISTE no plano de seguradora, mas
+          nao e margem bruta: e premio ganho menos sinistro e despesa de
+          comercializacao. Compara-la com margem bruta industrial seria
+          comparar coisas diferentes com o mesmo nome.
+      - conceito: ebit
+        motivo: >
+          A conta 3.07 "Resultado Antes do Resultado Financeiro e dos
+          Tributos" existe, mas para seguradora o resultado financeiro E parte
+          da operacao: a companhia investe a provisao tecnica enquanto o
+          sinistro nao ocorre. Excluir isso do operacional descreveria mal a
+          operacao.
+      - conceito: depreciacao_amortizacao
+        motivo: "EBITDA nao e definido para seguradora."
+      - conceito: divida_bruta
+        motivo: >
+          Confirmado no arquivo: em 2026T2 a conta 2.01.04 da BBSE3 e
+          "Capitalizacao", nao "Emprestimos e Financiamentos". Provisao
+          tecnica e obrigacao com segurado, nao divida de estrutura de capital.
+
+  ENERGIA:
+    descricao: >
+      Utilities de energia seguem o plano industrial. O plano existe separado
+      apenas para permitir excecoes futuras (ativo financeiro de concessao)
+      sem mexer no plano industrial.
+    herda: INDUSTRIAL
+    contas: {}
+    nao_se_aplica: []
+
+  INDEFINIDO:
+    descricao: >
+      Setor nao classificado. Nenhum indicador sensivel a plano de contas e
+      calculado: o sistema prefere nao mostrar numero a mostrar numero
+      possivelmente incomparavel. Classifique a empresa em
+      data/manual/sector_overrides.csv.
+    contas:
+      ativo_total:
+        codigos: ["1"]
+        demonstrativo: BPA
+        padrao_ds_conta: "ATIVO TOTAL"
+      passivo_total:
+        codigos: ["2"]
+        demonstrativo: BPP
+        padrao_ds_conta: "PASSIVO TOTAL"
+      patrimonio_liquido:
+        codigos: ["2.03"]
+        demonstrativo: BPP
+        padrao_ds_conta: "PATRIMONIO LIQUIDO"
+    nao_se_aplica:
+      - conceito: receita_liquida
+        motivo: "Setor nao classificado: plano de contas desconhecido."
+      - conceito: custo
+        motivo: "Setor nao classificado: plano de contas desconhecido."
+      - conceito: resultado_bruto
+        motivo: "Setor nao classificado: plano de contas desconhecido."
+      - conceito: ebit
+        motivo: "Setor nao classificado: plano de contas desconhecido."
+      - conceito: depreciacao_amortizacao
+        motivo: "Setor nao classificado: plano de contas desconhecido."
+
+# Indicadores e os conceitos de que dependem. Se qualquer dependencia estiver
+# em `nao_se_aplica` do plano, o indicador inteiro e NAO_SE_APLICA.
+dependencias_indicador:
+  margem_bruta: [receita_liquida, resultado_bruto]
+  margem_liquida: [receita_liquida, lucro_liquido]
+  giro_ativo: [receita_liquida, ativo_total]
+  alavancagem: [ativo_total, patrimonio_liquido]
+  roe: [lucro_liquido, patrimonio_liquido]
+  ebitda: [ebit, depreciacao_amortizacao]
+  ev_ebitda: [ebit, depreciacao_amortizacao, divida_bruta, caixa_equivalentes]
+  divida_liquida: [divida_bruta, caixa_equivalentes]
+  pl_ratio: [lucro_liquido]
+  pvp: [patrimonio_liquido]
+  fcl: [fco, fci]

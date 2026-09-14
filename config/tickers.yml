@@ -1,0 +1,40 @@
+# Conjunto de acompanhamento. Comece pequeno: o objetivo da primeira rodada e
+# validar as 6 regras de tratamento com dado real, nao cobrir o mercado.
+#
+# Os tickers abaixo foram escolhidos para exercitar os casos dificeis:
+#   - um banco  -> plano de contas financeiro (regra 6)
+#   - uma seguradora -> plano de seguradora (regra 6)
+#   - uma industrial com historico longo -> serie de 10 anos
+#   - uma empresa com desdobramento conhecido -> ajuste de preco
+#
+# O CNPJ nao e escrito aqui: ele e resolvido pelo de-para do FCA (regra 1).
+# Se um ticker nao resolver, o pipeline reporta e segue -- nao adivinha.
+
+# Janela de dados: ano corrente mais N anos para tras.
+#
+# A janela e RELATIVA de proposito. Uma lista fixa de anos envelhece em
+# silencio -- foi o que aconteceu antes: o arquivo dizia [2015..2024] e, em
+# 2026, o sistema ignorava calado os dois anos mais recentes, que sao os que
+# importam.
+#
+# 6 para tras + o corrente = 7 anos. Efeito na analise: o percentil de 5 anos
+# funciona; o de 10 anos fica FALTANDO, por falta de historico. Para habilitar
+# a janela de 10 anos, suba para 10.
+#
+# Ano ainda nao publicado pela fonte simplesmente nao aparece: os diretorios
+# da CVM sao listados antes do download, e o COTAHIST reporta o ano ausente
+# em vez de derrubar a extracao inteira.
+anos_para_tras_cvm: 6
+anos_para_tras_cotahist: 6
+
+# Para fixar uma janela fechada (reproduzir uma analise antiga, por exemplo),
+# descomente e liste os anos. A lista explicita vence o calculo automatico.
+# anos_cvm: [2023, 2024]
+# anos_cotahist: [2023, 2024]
+
+tickers:
+  - WEGE3   # industrial, historico longo, desdobramentos frequentes
+  - ITUB4   # banco -> plano financeiro
+  - BBSE3   # seguradora -> plano de seguradora
+  - TAEE11  # unit de transmissao de energia
+  - PETR4   # estatal, mudanca de politica de dividendo

@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+#
+# Atalho para os comandos do projeto.
+#
+#     ./b3 identidade
+#     ./b3 contas ITUB4
+#     ./b3 bruto ITUB4 --demonstrativo BPA
+#
+# Existe porque `.venv/bin/python run.py identidade` e atrito que nao deveria
+# existir. O usuario digitou `run.py identidade` tres vezes seguidas, e nas
+# tres o zsh respondeu `command not found` -- `run.py` nao e comando do
+# sistema, e o Python do projeto tem que vir na frente. Isso e problema do
+# projeto, nao de quem digita.
+#
+# Funciona de qualquer diretorio: ele mesmo acha a raiz.
+set -euo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")"
+
+if [ ! -x .venv/bin/python ]; then
+  echo "✗ .venv nao existe ainda. Rode ./comecar.sh primeiro." >&2
+  exit 1
+fi
+
+exec .venv/bin/python run.py "$@"

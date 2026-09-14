@@ -1,0 +1,73 @@
+# Gatilhos definidos pelo usuario.
+#
+# O sistema NAO sugere acao. Quando um gatilho dispara, a interface mostra
+# qual condicao foi satisfeita e os numeros que a satisfizeram. A leitura e
+# sua.
+#
+# Estrutura de um gatilho:
+#   nome        identificador curto
+#   descricao   o que voce quis observar (aparece na interface)
+#   escopo      TICKER (avaliado por papel) ou EMPRESA (por CNPJ)
+#   todas       lista de condicoes que precisam ser TODAS verdadeiras
+#   qualquer    lista de condicoes das quais BASTA UMA ser verdadeira
+#
+# Condicao: {metrica: <nome>, operador: <op>, valor: <numero|nome_de_metrica>}
+# Operadores: lt, le, gt, ge, eq, ne, entre (valor = [min, max]).
+#
+# Metrica ausente ou com status diferente de OK NAO satisfaz condicao e NAO
+# dispara gatilho: a avaliacao devolve INDETERMINADO, com o motivo. Faltou,
+# aparece como faltando.
+
+gatilhos:
+  - nome: pl_no_decil_inferior_10a
+    descricao: >
+      P/L abaixo do percentil 10 do proprio historico de 10 anos, com pelo
+      menos 5 anos de janela efetiva.
+    escopo: TICKER
+    todas:
+      - metrica: pl_pct_10a
+        operador: lt
+        valor: 0.10
+      - metrica: pl_n_obs_10a
+        operador: ge
+        valor: 1250
+
+  - nome: pvp_abaixo_de_um
+    descricao: "P/VP abaixo de 1, isto e, preco abaixo do patrimonio liquido contabil."
+    escopo: TICKER
+    todas:
+      - metrica: pvp
+        operador: lt
+        valor: 1.0
+
+  - nome: dividendo_nao_coberto_por_caixa
+    descricao: >
+      Dividendo pago no periodo excedeu o fluxo de caixa livre gerado
+      (cobertura < 1). Observacao, nao julgamento: pode ser uso deliberado de
+      caixa em balanco.
+    escopo: EMPRESA
+    todas:
+      - metrica: cobertura_dividendo_fcl
+        operador: lt
+        valor: 1.0
+
+  - nome: alavancagem_crescente_com_roe_caindo
+    descricao: >
+      ROE sustentado por alavancagem: alavancagem acima de 3x e margem
+      liquida abaixo de 5%.
+    escopo: EMPRESA
+    todas:
+      - metrica: alavancagem
+        operador: gt
+        valor: 3.0
+      - metrica: margem_liquida
+        operador: lt
+        valor: 0.05
+
+  - nome: drawdown_profundo
+    descricao: "Queda acumulada de 40% ou mais em relacao ao topo historico."
+    escopo: TICKER
+    qualquer:
+      - metrica: drawdown_atual
+        operador: le
+        valor: -0.40
